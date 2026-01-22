@@ -89,6 +89,32 @@ struct SettingsView: View {
                     .foregroundColor(.secondary)
             }
 
+            Section("iCloud Sync") {
+                Toggle("Sync servers to iCloud", isOn: $monitorService.iCloudSyncEnabled)
+                Text("When enabled, your server configurations will sync across all your devices signed into the same iCloud account.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                if monitorService.iCloudSyncEnabled {
+                    HStack {
+                        if monitorService.isICloudAvailable {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text("iCloud connected")
+                        } else {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                            Text("Sign in to iCloud to sync")
+                        }
+                    }
+                    .font(.caption)
+
+                    Button("Sync Now") {
+                        monitorService.forceICloudSync()
+                    }
+                }
+            }
+
             Section("Status") {
                 LabeledContent("Monitoring") {
                     Text(monitorService.isMonitoring ? "Active" : "Paused")

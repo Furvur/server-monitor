@@ -43,6 +43,15 @@ class MonitorService: ObservableObject {
     private var monitoringTask: Task<Void, Never>?
     private let configURL: URL
     let historyService: HistoryService
+    private let iCloudSync = iCloudSyncService.shared
+    @Published var iCloudSyncEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(iCloudSyncEnabled, forKey: "iCloudSyncEnabled")
+            if iCloudSyncEnabled {
+                syncToCloud()
+            }
+        }
+    }
 
     init() {
         // Load persisted settings with defaults
@@ -62,6 +71,14 @@ class MonitorService: ObservableObject {
         let savedRetention = UserDefaults.standard.integer(forKey: "historyRetentionHours")
         self.historyRetentionHours = savedRetention > 0 ? savedRetention : 24
 
+        // Default to true for iCloud sync if not previously set
+        if UserDefaults.standard.object(forKey: "iCloudSyncEnabled") == nil {
+            UserDefaults.standard.set(true, forKey: "iCloudSyncEnabled")
+            self.iCloudSyncEnabled = true
+        } else {
+            self.iCloudSyncEnabled = UserDefaults.standard.bool(forKey: "iCloudSyncEnabled")
+        }
+
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let appFolder = appSupport.appendingPathComponent("ServerMonitor", isDirectory: true)
 
@@ -72,6 +89,43 @@ class MonitorService: ObservableObject {
         self.historyService = HistoryService(retentionHours: savedRetention > 0 ? savedRetention : 24)
 
         loadServers()
+        setupiCloudSync()
+    }
+
+    private func setupiCloudSync() {
+        iCloudSync.onServersUpdated = { [weak self] cloudServers in
+            guard let self = self, self.iCloudSyncEnabled else { return }
+            Task { @MainActor in
+                // Merge cloud servers with local servers
+                let merged = self.iCloudSync.mergeServers(local: self.servers, cloud: cloudServers)
+                if merged != self.servers {
+                    self.servers = merged
+                    self.saveServersLocally()
+                }
+            }
+        }
+
+        // Perform initial sync if enabled
+        if iCloudSyncEnabled {
+            performInitialSync()
+        }
+    }
+
+    private func performInitialSync() {
+        if let cloudServers = iCloudSync.loadServersFromCloud() {
+            let merged = iCloudSync.mergeServers(local: servers, cloud: cloudServers)
+            if merged != servers {
+                servers = merged
+                saveServersLocally()
+            }
+        }
+        // Push local servers to cloud
+        syncToCloud()
+    }
+
+    private func syncToCloud() {
+        guard iCloudSyncEnabled else { return }
+        iCloudSync.saveServers(servers)
     }
 
     func startMonitoring() {
@@ -184,11 +238,28 @@ class MonitorService: ObservableObject {
     }
 
     private func saveServers() {
+        saveServersLocally()
+        syncToCloud()
+    }
+
+    private func saveServersLocally() {
         do {
             let data = try JSONEncoder().encode(servers)
             try data.write(to: configURL)
         } catch {
             print("Failed to save servers: \(error)")
+        }
+    }
+
+    /// Check if iCloud sync is available (user signed into iCloud)
+    var isICloudAvailable: Bool {
+        iCloudSync.isAvailable
+    }
+
+    /// Force a sync with iCloud
+    func forceICloudSync() {
+        if iCloudSyncEnabled {
+            performInitialSync()
         }
     }
 }
