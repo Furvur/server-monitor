@@ -8,10 +8,11 @@
 import Testing
 @testable import ServerMonitor
 
-struct ServerMonitorTests {
-
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
-    }
-
-}
+// Main test entry point - individual test files contain the actual tests:
+// - ServerTests.swift
+// - ServerStatsTests.swift
+// - MetricSnapshotTests.swift
+// - ServiceDefinitionTests.swift
+// - SSHServiceTests.swift
+// - HistoryServiceTests.swift
+// - MonitorServiceTests.swift

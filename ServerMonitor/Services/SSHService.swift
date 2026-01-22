@@ -168,7 +168,7 @@ actor SSHService {
         return stats
     }
 
-    private func parseServiceStatus(output: String, service: ServiceDefinition) -> ServiceStatus {
+    func parseServiceStatus(output: String, service: ServiceDefinition) -> ServiceStatus {
         let trimmedOutput = output.trimmingCharacters(in: .whitespacesAndNewlines)
 
         switch service.parseMode {
@@ -221,7 +221,7 @@ actor SSHService {
         }
     }
 
-    private func parseDockerContainers(output: String) -> [DockerContainer] {
+    func parseDockerContainers(output: String) -> [DockerContainer] {
         // Format: name\tstate\timage\tstatus
         let lines = output.components(separatedBy: .newlines).filter { !$0.isEmpty }
 
@@ -250,7 +250,8 @@ actor SSHService {
         }
     }
 
-    private func parseDetectedServices(output: String) -> [UUID] {
+    // Internal for testing
+    func parseDetectedServices(output: String) -> [UUID] {
         var detectedIds: [UUID] = []
 
         let lines = output.components(separatedBy: .newlines)
@@ -274,9 +275,9 @@ actor SSHService {
         return detectedIds
     }
 
-    // MARK: - System Stats Parsing
+    // MARK: - System Stats Parsing (internal for testing)
 
-    private func parseUptime(_ output: String) -> CPULoad? {
+    func parseUptime(_ output: String) -> CPULoad? {
         guard let loadRange = output.range(of: "load average") ?? output.range(of: "load averages") else {
             return nil
         }
@@ -290,7 +291,7 @@ actor SSHService {
         return CPULoad(load1: numbers[0], load5: numbers[1], load15: numbers[2])
     }
 
-    private func parseMemory(_ output: String) -> MemoryStats? {
+    func parseMemory(_ output: String) -> MemoryStats? {
         let lines = output.components(separatedBy: .newlines)
 
         for line in lines {
@@ -308,7 +309,7 @@ actor SSHService {
         return nil
     }
 
-    private func parseDisk(_ output: String) -> DiskStats? {
+    func parseDisk(_ output: String) -> DiskStats? {
         let lines = output.components(separatedBy: .newlines)
 
         for line in lines {
@@ -329,7 +330,7 @@ actor SSHService {
         return nil
     }
 
-    private func parseSize(_ str: String) -> Double {
+    func parseSize(_ str: String) -> Double {
         let value = Double(str.filter { $0.isNumber || $0 == "." }) ?? 0
         if str.hasSuffix("T") { return value * 1024 }
         if str.hasSuffix("G") { return value }
