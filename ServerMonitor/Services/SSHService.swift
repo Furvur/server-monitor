@@ -51,6 +51,11 @@ actor SSHService {
             "-o", "StrictHostKeyChecking=accept-new"
         ]
 
+        // Use specified SSH key if provided
+        if let keyPath = server.sshKeyPath, !keyPath.isEmpty {
+            arguments.append(contentsOf: ["-i", keyPath])
+        }
+
         if server.port != 22 {
             arguments.append(contentsOf: ["-p", String(server.port)])
         }
