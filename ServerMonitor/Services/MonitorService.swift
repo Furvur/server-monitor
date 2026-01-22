@@ -12,20 +12,56 @@ class MonitorService: ObservableObject {
     @Published var servers: [Server] = []
     @Published var stats: [UUID: ServerStats] = [:]
     @Published var isMonitoring: Bool = false
-    @Published var refreshInterval: TimeInterval = 30  // seconds
+    @Published var refreshInterval: TimeInterval {
+        didSet {
+            UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval")
+            // Restart monitoring if interval changed while monitoring
+            if isMonitoring && oldValue != refreshInterval {
+                restartMonitoring()
+            }
+        }
+    }
     @Published var showInMenuBar: Bool {
         didSet {
             UserDefaults.standard.set(showInMenuBar, forKey: "showInMenuBar")
             NotificationCenter.default.post(name: .menuBarVisibilityChanged, object: nil)
         }
     }
+    @Published var autoStartOnLaunch: Bool {
+        didSet {
+            UserDefaults.standard.set(autoStartOnLaunch, forKey: "autoStartOnLaunch")
+        }
+    }
+    @Published var historyRetentionHours: Int {
+        didSet {
+            UserDefaults.standard.set(historyRetentionHours, forKey: "historyRetentionHours")
+            historyService.retentionHours = historyRetentionHours
+        }
+    }
 
     private let sshService = SSHService()
     private var monitoringTask: Task<Void, Never>?
     private let configURL: URL
+    let historyService: HistoryService
 
     init() {
+        // Load persisted settings with defaults
         self.showInMenuBar = UserDefaults.standard.bool(forKey: "showInMenuBar")
+
+        let savedRefreshInterval = UserDefaults.standard.double(forKey: "refreshInterval")
+        self.refreshInterval = savedRefreshInterval > 0 ? savedRefreshInterval : 30
+
+        // Default to true for autoStartOnLaunch if not previously set
+        if UserDefaults.standard.object(forKey: "autoStartOnLaunch") == nil {
+            UserDefaults.standard.set(true, forKey: "autoStartOnLaunch")
+            self.autoStartOnLaunch = true
+        } else {
+            self.autoStartOnLaunch = UserDefaults.standard.bool(forKey: "autoStartOnLaunch")
+        }
+
+        let savedRetention = UserDefaults.standard.integer(forKey: "historyRetentionHours")
+        self.historyRetentionHours = savedRetention > 0 ? savedRetention : 24
+
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let appFolder = appSupport.appendingPathComponent("ServerMonitor", isDirectory: true)
 
@@ -33,6 +69,8 @@ class MonitorService: ObservableObject {
         try? FileManager.default.createDirectory(at: appFolder, withIntermediateDirectories: true)
 
         self.configURL = appFolder.appendingPathComponent("servers.json")
+        self.historyService = HistoryService(retentionHours: savedRetention > 0 ? savedRetention : 24)
+
         loadServers()
     }
 
@@ -54,6 +92,11 @@ class MonitorService: ObservableObject {
         monitoringTask = nil
     }
 
+    func restartMonitoring() {
+        stopMonitoring()
+        startMonitoring()
+    }
+
     func refreshAllServers() async {
         let enabledServers = servers.filter { $0.isEnabled }
 
@@ -66,8 +109,26 @@ class MonitorService: ObservableObject {
 
             for await stat in group {
                 stats[stat.id] = stat
+                // Record snapshot for history
+                if stat.status == .online {
+                    recordSnapshot(for: stat)
+                }
             }
         }
+    }
+
+    private func recordSnapshot(for stats: ServerStats) {
+        let snapshot = MetricSnapshot(
+            serverId: stats.id,
+            timestamp: stats.lastUpdated,
+            load1: stats.cpuLoad?.load1,
+            load5: stats.cpuLoad?.load5,
+            load15: stats.cpuLoad?.load15,
+            memoryTotalMB: stats.memory?.totalMB,
+            memoryUsedMB: stats.memory?.usedMB,
+            diskUsagePercent: stats.disk?.usagePercent
+        )
+        historyService.recordSnapshot(snapshot)
     }
 
     func refreshServer(_ server: Server) async {

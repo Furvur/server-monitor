@@ -135,7 +135,7 @@ struct MainWindowView: View {
     private var detailView: some View {
         if let server = selectedServer,
            let stats = monitorService.stats[server.id] {
-            ServerDetailView(server: server, stats: stats)
+            ServerDetailView(server: server, stats: stats, historyService: monitorService.historyService)
         } else if monitorService.servers.isEmpty {
             ContentUnavailableView {
                 Label("No Servers", systemImage: "server.rack")
@@ -241,13 +241,11 @@ struct ServerFormView: View {
             .padding(.horizontal)
 
             // Tab content
-            TabView(selection: $selectedTab) {
+            if selectedTab == 0 {
                 connectionTab
-                    .tag(0)
+            } else {
                 servicesTab
-                    .tag(1)
             }
-            .tabViewStyle(.automatic)
 
             Divider()
 
@@ -561,11 +559,6 @@ struct ServiceToggleRow: View {
 
     var body: some View {
         HStack {
-            Image(systemName: service.icon)
-                .font(.body)
-                .foregroundColor(isEnabled ? .accentColor : .secondary)
-                .frame(width: 24)
-
             Text(service.name)
                 .font(.subheadline)
 
@@ -622,11 +615,41 @@ struct ServerSidebarRow: View {
 
 // MARK: - Server Detail View
 
+enum DetailTab: String, CaseIterable {
+    case overview = "Overview"
+    case charts = "Charts"
+}
+
 struct ServerDetailView: View {
     let server: Server
     let stats: ServerStats
+    let historyService: HistoryService
+    @State private var selectedTab: DetailTab = .overview
 
     var body: some View {
+        VStack(spacing: 0) {
+            // Tab picker
+            Picker("", selection: $selectedTab) {
+                ForEach(DetailTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding()
+            .frame(width: 200)
+
+            // Tab content
+            switch selectedTab {
+            case .overview:
+                overviewContent
+            case .charts:
+                ServerChartsView(server: server, historyService: historyService)
+            }
+        }
+        .navigationTitle(server.name)
+    }
+
+    private var overviewContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 headerSection
@@ -642,7 +665,6 @@ struct ServerDetailView: View {
             }
             .padding()
         }
-        .navigationTitle(server.name)
     }
 
     private var headerSection: some View {

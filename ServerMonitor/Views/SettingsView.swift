@@ -74,8 +74,19 @@ struct SettingsView: View {
                     Text("5 minutes").tag(TimeInterval(300))
                 }
 
-                Toggle("Start monitoring on launch", isOn: .constant(true))
-                    .disabled(true)  // Always true for now
+                Toggle("Start monitoring on launch", isOn: $monitorService.autoStartOnLaunch)
+            }
+
+            Section("History") {
+                Picker("Data Retention", selection: $monitorService.historyRetentionHours) {
+                    Text("1 hour").tag(1)
+                    Text("6 hours").tag(6)
+                    Text("24 hours").tag(24)
+                    Text("7 days").tag(168)
+                }
+                Text("Historical data older than this will be automatically deleted.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             Section("Status") {

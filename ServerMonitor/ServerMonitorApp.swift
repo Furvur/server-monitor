@@ -54,7 +54,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        monitorService.startMonitoring()
+        // Start monitoring if autoStartOnLaunch is enabled
+        if monitorService.autoStartOnLaunch {
+            monitorService.startMonitoring()
+        }
     }
 
     @objc private func handleMenuBarVisibilityChanged() {
