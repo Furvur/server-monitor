@@ -63,6 +63,15 @@
 - [x] Fix toggle switch artifacts in server form
 - [x] Remove icons from services list for cleaner UI
 
+#### Unit Tests (113 tests)
+- [x] Server model tests (initialization, Codable, Hashable)
+- [x] ServerStats tests (status, CPU, memory, disk display strings)
+- [x] MetricSnapshot tests (Codable, memory percentage calculation)
+- [x] ServiceDefinition & BuiltInServices tests (categories, lookups)
+- [x] SSHService parsing tests (uptime, memory, disk, Docker, services)
+- [x] HistoryService tests (record/retrieve, filtering, retention)
+- [x] MonitorService tests (settings persistence, server CRUD)
+
 ---
 
 ## Planned
