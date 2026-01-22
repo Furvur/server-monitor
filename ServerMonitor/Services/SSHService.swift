@@ -20,16 +20,109 @@ actor SSHService {
 
             stats = parseStats(output: output, serverId: server.id, server: server)
             stats.status = .online
-        } catch SSHError.timeout {
-            stats.status = .offline
-        } catch SSHError.connectionFailed {
-            stats.status = .offline
+        } catch let error as SSHError {
+            let (status, message) = parseSSHError(error, server: server)
+            stats.status = status
+            stats.errorMessage = message
         } catch {
             stats.status = .error
+            stats.errorMessage = "Unexpected error: \(error.localizedDescription)"
         }
 
         stats.lastUpdated = Date()
         return stats
+    }
+
+    // MARK: - Error Parsing
+
+    private func parseSSHError(_ error: SSHError, server: Server) -> (ServerStatus, String) {
+        switch error {
+        case .timeout:
+            return (.offline, "Connection timed out - server may be unreachable or blocked by firewall")
+
+        case .connectionFailed(let output):
+            return parseConnectionError(output, server: server)
+
+        case .authenticationFailed:
+            return (.error, "Authentication failed - check SSH key and username")
+
+        case .commandFailed(let output):
+            return (.error, "Command failed: \(output.prefix(100))")
+
+        case .executionError(let message):
+            return (.error, "Execution error: \(message)")
+        }
+    }
+
+    private func parseConnectionError(_ output: String, server: Server) -> (ServerStatus, String) {
+        let lowercased = output.lowercased()
+
+        // Timeout errors
+        if lowercased.contains("connection timed out") || lowercased.contains("timed out") {
+            return (.offline, "Connection timed out - server may be unreachable")
+        }
+
+        // Connection refused
+        if lowercased.contains("connection refused") {
+            let portInfo = server.port != 22 ? " (port \(server.port))" : ""
+            return (.offline, "Connection refused - SSH may not be running\(portInfo)")
+        }
+
+        // Network unreachable
+        if lowercased.contains("no route to host") {
+            return (.offline, "No route to host - check network connectivity")
+        }
+
+        if lowercased.contains("network is unreachable") {
+            return (.offline, "Network unreachable - check your internet connection")
+        }
+
+        // DNS errors
+        if lowercased.contains("could not resolve hostname") || lowercased.contains("name or service not known") {
+            return (.offline, "Cannot resolve hostname '\(server.host)' - check server address")
+        }
+
+        // Host key errors
+        if output.contains("REMOTE HOST IDENTIFICATION HAS CHANGED") {
+            return (.error, "Host key changed - server may have been reinstalled or this could be a security issue")
+        }
+
+        if lowercased.contains("host key verification failed") {
+            return (.error, "Host key verification failed - try connecting manually first")
+        }
+
+        // Authentication errors
+        if lowercased.contains("permission denied") {
+            if lowercased.contains("publickey") {
+                return (.error, "Authentication failed - SSH key not accepted for user '\(server.username)'")
+            }
+            return (.error, "Permission denied - check username and SSH key")
+        }
+
+        // SSH key file errors
+        if lowercased.contains("no such file") {
+            if let keyPath = server.sshKeyPath, output.contains(keyPath) {
+                return (.error, "SSH key file not found: \(keyPath)")
+            }
+            return (.error, "File not found during connection")
+        }
+
+        if lowercased.contains("bad permissions") || lowercased.contains("permissions") && lowercased.contains("ignored") {
+            return (.error, "SSH key has incorrect permissions - run: chmod 600 <key_file>")
+        }
+
+        // Passphrase required
+        if lowercased.contains("passphrase") || lowercased.contains("enter passphrase") {
+            return (.error, "SSH key requires passphrase - add key to ssh-agent first")
+        }
+
+        // Port errors
+        if lowercased.contains("port") && lowercased.contains("closed") {
+            return (.offline, "Port \(server.port) is closed on \(server.host)")
+        }
+
+        // Generic connection failure
+        return (.offline, "Connection failed: \(output.prefix(100))")
     }
 
     // MARK: - Auto-detect Services

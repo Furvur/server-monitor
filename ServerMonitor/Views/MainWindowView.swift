@@ -484,6 +484,8 @@ struct ServerFormView: View {
                 isTesting = false
                 if stats.status == .online {
                     testResult = "Success! Connected to server."
+                } else if let errorMessage = stats.errorMessage {
+                    testResult = errorMessage
                 } else {
                     testResult = "Failed: \(stats.status.rawValue)"
                 }
@@ -698,13 +700,23 @@ struct ServerDetailView: View {
 
     private var statusSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Server is \(stats.status.rawValue.lowercased())")
-                .font(.headline)
-                .foregroundColor(.secondary)
+            HStack {
+                Image(systemName: stats.status == .offline ? "wifi.slash" : "exclamationmark.triangle.fill")
+                    .foregroundColor(.red)
+                Text("Server is \(stats.status.rawValue.lowercased())")
+                    .font(.headline)
+            }
+
+            if let errorMessage = stats.errorMessage {
+                Text(errorMessage)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Color.red.opacity(0.1))
         .cornerRadius(8)
     }
 

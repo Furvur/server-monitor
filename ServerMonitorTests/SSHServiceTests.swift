@@ -455,3 +455,43 @@ struct SSHServiceParsingTests {
         #expect(status.details == "custom output here")
     }
 }
+
+// MARK: - Error Message Tests
+
+struct SSHServiceErrorTests {
+
+    @Test func serverStatsContainsErrorMessageOnFailure() async {
+        // Create a server with invalid host to trigger connection failure
+        let server = Server(
+            name: "Test",
+            host: "invalid.nonexistent.host.local",
+            username: "testuser"
+        )
+
+        let sshService = SSHService()
+        let stats = await sshService.fetchStats(for: server)
+
+        // Should have an error message
+        #expect(stats.status == .offline || stats.status == .error)
+        #expect(stats.errorMessage != nil)
+    }
+
+    @Test func errorMessageNotNilWhenOffline() {
+        // Test that ServerStats can hold an error message
+        var stats = ServerStats(serverId: UUID(), status: .offline, errorMessage: "Test error message")
+
+        #expect(stats.errorMessage == "Test error message")
+        #expect(stats.status == .offline)
+
+        // Test that we can update the error message
+        stats.errorMessage = "Updated error message"
+        #expect(stats.errorMessage == "Updated error message")
+    }
+
+    @Test func errorMessageNilWhenOnline() {
+        let stats = ServerStats(serverId: UUID(), status: .online)
+
+        #expect(stats.errorMessage == nil)
+        #expect(stats.status == .online)
+    }
+}

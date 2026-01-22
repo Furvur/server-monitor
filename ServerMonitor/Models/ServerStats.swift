@@ -13,8 +13,9 @@ struct ServerStats: Identifiable, Sendable {
     var disk: DiskStats?
     var services: [UUID: ServiceStatus]  // Service ID -> Status
     var lastUpdated: Date
+    var errorMessage: String?  // Detailed error message when status is .error or .offline
 
-    nonisolated init(serverId: UUID, status: ServerStatus = .unknown) {
+    nonisolated init(serverId: UUID, status: ServerStatus = .unknown, errorMessage: String? = nil) {
         self.id = serverId
         self.status = status
         self.cpuLoad = nil
@@ -22,6 +23,7 @@ struct ServerStats: Identifiable, Sendable {
         self.disk = nil
         self.services = [:]
         self.lastUpdated = Date()
+        self.errorMessage = errorMessage
     }
 
     /// Count of running services
