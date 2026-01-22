@@ -11,6 +11,7 @@ struct ServerStats: Identifiable, Sendable {
     var cpuLoad: CPULoad?
     var memory: MemoryStats?
     var disk: DiskStats?
+    var services: [UUID: ServiceStatus]  // Service ID -> Status
     var lastUpdated: Date
 
     nonisolated init(serverId: UUID, status: ServerStatus = .unknown) {
@@ -19,7 +20,18 @@ struct ServerStats: Identifiable, Sendable {
         self.cpuLoad = nil
         self.memory = nil
         self.disk = nil
+        self.services = [:]
         self.lastUpdated = Date()
+    }
+
+    /// Count of running services
+    var runningServicesCount: Int {
+        services.values.filter { $0.isRunning }.count
+    }
+
+    /// Count of total monitored services
+    var totalServicesCount: Int {
+        services.count
     }
 }
 

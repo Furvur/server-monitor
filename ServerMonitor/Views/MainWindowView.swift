@@ -188,8 +188,11 @@ struct ServerFormView: View {
     @State private var port: String = "22"
     @State private var username: String = ""
     @State private var selectedKeyPath: String = ""
+    @State private var enabledServices: Set<UUID> = []
     @State private var testResult: String?
     @State private var isTesting: Bool = false
+    @State private var isDetectingServices: Bool = false
+    @State private var selectedTab = 0
 
     private var existingServer: Server? {
         if case .edit(let server) = mode {
@@ -208,11 +211,12 @@ struct ServerFormView: View {
             _port = State(initialValue: String(server.port))
             _username = State(initialValue: server.username)
             _selectedKeyPath = State(initialValue: server.sshKeyPath ?? "")
+            _enabledServices = State(initialValue: Set(server.enabledServices))
         }
     }
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 0) {
             // Header
             HStack {
                 Text(mode.title)
@@ -226,8 +230,62 @@ struct ServerFormView: View {
                 }
                 .buttonStyle(.plain)
             }
+            .padding()
 
-            // Form fields
+            // Tab picker
+            Picker("", selection: $selectedTab) {
+                Text("Connection").tag(0)
+                Text("Services").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+
+            // Tab content
+            TabView(selection: $selectedTab) {
+                connectionTab
+                    .tag(0)
+                servicesTab
+                    .tag(1)
+            }
+            .tabViewStyle(.automatic)
+
+            Divider()
+
+            // Actions
+            HStack {
+                Button("Test Connection") {
+                    testConnection()
+                }
+                .disabled(isTesting || !isValid)
+
+                if isTesting {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                }
+
+                Spacer()
+
+                Button("Cancel") {
+                    dismiss()
+                }
+                .keyboardShortcut(.escape)
+
+                Button(mode.buttonTitle) {
+                    save()
+                }
+                .keyboardShortcut(.return)
+                .buttonStyle(.borderedProminent)
+                .disabled(!isValid)
+            }
+            .padding()
+        }
+        .frame(width: 450, height: 500)
+    }
+
+    // MARK: - Connection Tab
+
+    private var connectionTab: some View {
+        ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Display Name")
@@ -277,53 +335,73 @@ struct ServerFormView: View {
                     }
                     .labelsHidden()
                 }
-            }
 
-            // Test result
-            if let result = testResult {
-                HStack {
-                    Image(systemName: result.contains("Success") ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundColor(result.contains("Success") ? .green : .red)
-                    Text(result)
-                        .font(.callout)
-                    Spacer()
+                // Test result
+                if let result = testResult {
+                    HStack {
+                        Image(systemName: result.contains("Success") ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundColor(result.contains("Success") ? .green : .red)
+                        Text(result)
+                            .font(.callout)
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background(result.contains("Success") ? Color.green.opacity(0.1) : Color.red.opacity(0.1))
+                    .cornerRadius(8)
                 }
-                .padding(10)
-                .background(result.contains("Success") ? Color.green.opacity(0.1) : Color.red.opacity(0.1))
-                .cornerRadius(8)
             }
+            .padding()
+        }
+    }
 
-            Spacer()
+    // MARK: - Services Tab
 
-            // Actions
+    private var servicesTab: some View {
+        VStack(spacing: 0) {
+            // Auto-detect button
             HStack {
-                Button("Test Connection") {
-                    testConnection()
+                Button {
+                    autoDetectServices()
+                } label: {
+                    HStack {
+                        if isDetectingServices {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "sparkle.magnifyingglass")
+                        }
+                        Text("Auto-detect Services")
+                    }
                 }
-                .disabled(isTesting || !isValid)
-
-                if isTesting {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                }
+                .disabled(isDetectingServices || !isValid)
 
                 Spacer()
 
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.escape)
+                Text("\(enabledServices.count) selected")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding()
 
-                Button(mode.buttonTitle) {
-                    save()
+            Divider()
+
+            // Services list by category
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(ServiceCategory.allCases, id: \.self) { category in
+                        let services = BuiltInServices.byCategory[category] ?? []
+                        if !services.isEmpty {
+                            ServiceCategorySection(
+                                category: category,
+                                services: services,
+                                enabledServices: $enabledServices
+                            )
+                        }
+                    }
                 }
-                .keyboardShortcut(.return)
-                .buttonStyle(.borderedProminent)
-                .disabled(!isValid)
+                .padding()
             }
         }
-        .padding()
-        .frame(width: 400, height: 380)
     }
 
     private var sshDirectory: String {
@@ -381,6 +459,7 @@ struct ServerFormView: View {
             port: Int(port) ?? 22,
             username: username,
             sshKeyPath: selectedKeyPath.isEmpty ? nil : selectedKeyPath,
+            enabledServices: Array(enabledServices),
             isEnabled: existingServer?.isEnabled ?? true
         )
         onSave(server)
@@ -412,6 +491,97 @@ struct ServerFormView: View {
                 }
             }
         }
+    }
+
+    private func autoDetectServices() {
+        isDetectingServices = true
+
+        let server = Server(
+            name: name,
+            host: host,
+            port: Int(port) ?? 22,
+            username: username,
+            sshKeyPath: selectedKeyPath.isEmpty ? nil : selectedKeyPath
+        )
+
+        Task {
+            let sshService = SSHService()
+            let detectedIds = await sshService.detectServices(for: server)
+
+            await MainActor.run {
+                isDetectingServices = false
+                for id in detectedIds {
+                    enabledServices.insert(id)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Service Category Section
+
+struct ServiceCategorySection: View {
+    let category: ServiceCategory
+    let services: [ServiceDefinition]
+    @Binding var enabledServices: Set<UUID>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(category.displayName)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+                .textCase(.uppercase)
+
+            VStack(spacing: 4) {
+                ForEach(services) { service in
+                    ServiceToggleRow(
+                        service: service,
+                        isEnabled: enabledServices.contains(service.id),
+                        onToggle: { enabled in
+                            if enabled {
+                                enabledServices.insert(service.id)
+                            } else {
+                                enabledServices.remove(service.id)
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Service Toggle Row
+
+struct ServiceToggleRow: View {
+    let service: ServiceDefinition
+    let isEnabled: Bool
+    let onToggle: (Bool) -> Void
+
+    var body: some View {
+        HStack {
+            Image(systemName: service.icon)
+                .font(.body)
+                .foregroundColor(isEnabled ? .accentColor : .secondary)
+                .frame(width: 24)
+
+            Text(service.name)
+                .font(.subheadline)
+
+            Spacer()
+
+            Toggle("", isOn: Binding(
+                get: { isEnabled },
+                set: { onToggle($0) }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(isEnabled ? Color.accentColor.opacity(0.1) : Color.clear)
+        .cornerRadius(6)
     }
 }
 
@@ -462,6 +632,9 @@ struct ServerDetailView: View {
                 headerSection
                 if stats.status == .online {
                     statsSection
+                    if !server.enabledServices.isEmpty {
+                        servicesSection
+                    }
                 } else {
                     statusSection
                 }
@@ -481,6 +654,14 @@ struct ServerDetailView: View {
                 Text(stats.status.rawValue)
                     .font(.title2)
                     .fontWeight(.medium)
+
+                Spacer()
+
+                if !server.enabledServices.isEmpty {
+                    Text("\(stats.runningServicesCount)/\(stats.totalServicesCount) services")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Text("\(server.username)@\(server.host)")
@@ -538,12 +719,162 @@ struct ServerDetailView: View {
         }
     }
 
+    private var servicesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Services")
+                .font(.headline)
+
+            ForEach(server.enabledServices, id: \.self) { serviceId in
+                if let service = BuiltInServices.service(withId: serviceId) {
+                    ServiceStatusCard(
+                        service: service,
+                        status: stats.services[serviceId]
+                    )
+                }
+            }
+        }
+    }
+
     private var statusColor: Color {
         switch stats.status {
         case .online: return .green
         case .offline, .error: return .red
         case .connecting: return .yellow
         case .unknown: return .gray
+        }
+    }
+}
+
+// MARK: - Service Status Card
+
+struct ServiceStatusCard: View {
+    let service: ServiceDefinition
+    let status: ServiceStatus?
+    @State private var isExpanded = false
+
+    private var isRunning: Bool {
+        status?.isRunning ?? false
+    }
+
+    private var hasContainers: Bool {
+        status?.containers != nil && !(status?.containers?.isEmpty ?? true)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Main service row
+            HStack {
+                Image(systemName: service.icon)
+                    .font(.title3)
+                    .foregroundColor(isRunning ? .green : .secondary)
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(service.name)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    if let details = status?.details {
+                        Text(details)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Spacer()
+
+                // Status indicator
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(isRunning ? Color.green : Color.red)
+                        .frame(width: 8, height: 8)
+                    Text(isRunning ? "Running" : "Stopped")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                // Expand button for Docker containers
+                if hasContainers {
+                    Button {
+                        withAnimation {
+                            isExpanded.toggle()
+                        }
+                    } label: {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(12)
+
+            // Docker containers list (expandable)
+            if hasContainers && isExpanded {
+                Divider()
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(status?.containers ?? []) { container in
+                        ContainerRow(container: container)
+                        if container.id != status?.containers?.last?.id {
+                            Divider()
+                                .padding(.leading, 36)
+                        }
+                    }
+                }
+            }
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+        .cornerRadius(8)
+    }
+}
+
+// MARK: - Container Row
+
+struct ContainerRow: View {
+    let container: DockerContainer
+
+    var body: some View {
+        HStack {
+            Image(systemName: container.state.icon)
+                .font(.caption)
+                .foregroundColor(stateColor)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(container.name)
+                    .font(.caption)
+                    .fontWeight(.medium)
+
+                Text(container.displayImage)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(container.state.displayName)
+                    .font(.caption)
+                    .foregroundColor(stateColor)
+
+                Text(container.status)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+    }
+
+    private var stateColor: Color {
+        switch container.state {
+        case .running: return .green
+        case .exited: return .gray
+        case .paused: return .yellow
+        case .restarting: return .orange
+        case .dead, .removing: return .red
+        case .created: return .blue
         }
     }
 }
