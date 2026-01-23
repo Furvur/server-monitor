@@ -495,3 +495,437 @@ struct SSHServiceErrorTests {
         #expect(stats.status == .online)
     }
 }
+
+// MARK: - New Parsing Method Tests
+
+struct SSHServiceNewParsingTests {
+
+    // MARK: - parseUptimeSeconds Tests
+
+    @Test func parseUptimeSecondsLinuxFormat() async {
+        let sshService = SSHService()
+        let output = "123456.78 234567.89"
+
+        let uptime = await sshService.parseUptimeSeconds(output)
+
+        #expect(uptime != nil)
+        #expect(uptime?.totalSeconds == 123456)
+    }
+
+    @Test func parseUptimeSecondsShortUptime() async {
+        let sshService = SSHService()
+        let output = "3600.50 7200.00"
+
+        let uptime = await sshService.parseUptimeSeconds(output)
+
+        #expect(uptime != nil)
+        #expect(uptime?.totalSeconds == 3600)
+        #expect(uptime?.hours == 1)
+        #expect(uptime?.minutes == 0)
+    }
+
+    @Test func parseUptimeSecondsLongUptime() async {
+        let sshService = SSHService()
+        // 30 days in seconds = 2592000
+        let output = "2592000.00 5000000.00"
+
+        let uptime = await sshService.parseUptimeSeconds(output)
+
+        #expect(uptime != nil)
+        #expect(uptime?.totalSeconds == 2592000)
+        #expect(uptime?.days == 30)
+    }
+
+    @Test func parseUptimeSecondsDisplayString() async {
+        let sshService = SSHService()
+        // 2 days, 3 hours, 45 minutes = 2*86400 + 3*3600 + 45*60 = 186300
+        let output = "186300.00 0"
+
+        let uptime = await sshService.parseUptimeSeconds(output)
+
+        #expect(uptime != nil)
+        #expect(uptime?.days == 2)
+        #expect(uptime?.hours == 3)
+        #expect(uptime?.minutes == 45)
+        #expect(uptime?.displayString == "2d 3h 45m")
+    }
+
+    @Test func parseUptimeSecondsShortDisplayString() async {
+        let sshService = SSHService()
+        // 45 minutes = 2700 seconds
+        let output = "2700.00 0"
+
+        let uptime = await sshService.parseUptimeSeconds(output)
+
+        #expect(uptime != nil)
+        #expect(uptime?.displayString == "45m")
+    }
+
+    @Test func parseUptimeSecondsEmptyOutput() async {
+        let sshService = SSHService()
+        let uptime = await sshService.parseUptimeSeconds("")
+
+        #expect(uptime == nil)
+    }
+
+    @Test func parseUptimeSecondsInvalidOutput() async {
+        let sshService = SSHService()
+        let uptime = await sshService.parseUptimeSeconds("not a number")
+
+        #expect(uptime == nil)
+    }
+
+    // MARK: - parseSwap Tests
+
+    @Test func parseSwapLinuxFormat() async {
+        let sshService = SSHService()
+        let output = "Swap:          2047         500        1547"
+
+        let swap = await sshService.parseSwap(output)
+
+        #expect(swap != nil)
+        #expect(swap?.totalMB == 2047)
+        #expect(swap?.usedMB == 500)
+        #expect(swap?.freeMB == 1547)
+    }
+
+    @Test func parseSwapNoSwapConfigured() async {
+        let sshService = SSHService()
+        let output = "Swap:             0           0           0"
+
+        let swap = await sshService.parseSwap(output)
+
+        #expect(swap != nil)
+        #expect(swap?.totalMB == 0)
+        #expect(swap?.usedMB == 0)
+        #expect(swap?.isActive == false)
+    }
+
+    @Test func parseSwapActiveSwap() async {
+        let sshService = SSHService()
+        let output = "Swap:          4096        1024        3072"
+
+        let swap = await sshService.parseSwap(output)
+
+        #expect(swap != nil)
+        #expect(swap?.isActive == true)
+        #expect(swap?.usagePercent == 25.0)
+    }
+
+    @Test func parseSwapDisplayString() async {
+        let sshService = SSHService()
+        let output = "Swap:          2048        1024        1024"
+
+        let swap = await sshService.parseSwap(output)
+
+        #expect(swap != nil)
+        #expect(swap?.displayString.contains("50%") == true)
+    }
+
+    @Test func parseSwapDisplayStringNotConfigured() async {
+        let sshService = SSHService()
+        let output = "Swap:             0           0           0"
+
+        let swap = await sshService.parseSwap(output)
+
+        #expect(swap != nil)
+        #expect(swap?.displayString == "Not configured")
+    }
+
+    @Test func parseSwapEmptyOutput() async {
+        let sshService = SSHService()
+        let swap = await sshService.parseSwap("")
+
+        #expect(swap != nil)
+        #expect(swap?.totalMB == 0)
+    }
+
+    @Test func parseSwapCaseInsensitive() async {
+        let sshService = SSHService()
+        let output = "swap:          1024         256         768"
+
+        let swap = await sshService.parseSwap(output)
+
+        #expect(swap != nil)
+        #expect(swap?.totalMB == 1024)
+    }
+
+    // MARK: - parseNetwork Tests
+
+    @Test func parseNetworkLinuxProcNetDev() async {
+        let sshService = SSHService()
+        // Format: interface: rx_bytes rx_packets rx_errs rx_drop rx_fifo rx_frame rx_compressed rx_multicast tx_bytes tx_packets...
+        let output = "  eth0: 1234567890 1000000 0 0 0 0 0 0 9876543210 900000 0 0 0 0 0 0"
+
+        let network = await sshService.parseNetwork(output)
+
+        #expect(network != nil)
+        #expect(network?.bytesIn == 1234567890)
+        #expect(network?.bytesOut == 9876543210)
+    }
+
+    @Test func parseNetworkDisplayBytes() async {
+        let sshService = SSHService()
+        // 1.5 GB in, 500 MB out
+        let output = "  eth0: 1610612736 1000000 0 0 0 0 0 0 524288000 900000 0 0 0 0 0 0"
+
+        let network = await sshService.parseNetwork(output)
+
+        #expect(network != nil)
+        #expect(network?.displayBytesIn == "1.5 GB")
+        #expect(network?.displayBytesOut == "500.0 MB")
+    }
+
+    @Test func parseNetworkSmallValues() async {
+        let sshService = SSHService()
+        // 100 KB in, 50 KB out
+        let output = "  eth0: 102400 100 0 0 0 0 0 0 51200 50 0 0 0 0 0 0"
+
+        let network = await sshService.parseNetwork(output)
+
+        #expect(network != nil)
+        #expect(network?.displayBytesIn == "100.0 KB")
+        #expect(network?.displayBytesOut == "50.0 KB")
+    }
+
+    @Test func parseNetworkTerabyteValues() async {
+        let sshService = SSHService()
+        // 1.5 TB
+        let output = "  eth0: 1649267441664 1000000 0 0 0 0 0 0 1099511627776 900000 0 0 0 0 0 0"
+
+        let network = await sshService.parseNetwork(output)
+
+        #expect(network != nil)
+        #expect(network?.displayBytesIn == "1.5 TB")
+        #expect(network?.displayBytesOut == "1.0 TB")
+    }
+
+    @Test func parseNetworkEmptyOutput() async {
+        let sshService = SSHService()
+        let network = await sshService.parseNetwork("")
+
+        #expect(network == nil)
+    }
+
+    @Test func parseNetworkInvalidFormat() async {
+        let sshService = SSHService()
+        let network = await sshService.parseNetwork("invalid network output")
+
+        #expect(network == nil)
+    }
+
+    // MARK: - parseSystemInfo Tests
+
+    @Test func parseSystemInfoUbuntu() async {
+        let sshService = SSHService()
+        let output = """
+        NAME="Ubuntu"
+        VERSION_ID="22.04"
+        KERNEL=5.15.0-91-generic
+        ARCH=x86_64
+        HOSTNAME=webserver01
+        """
+
+        let sysInfo = await sshService.parseSystemInfo(output)
+
+        #expect(sysInfo != nil)
+        #expect(sysInfo?.osName == "Ubuntu")
+        #expect(sysInfo?.osVersion == "22.04")
+        #expect(sysInfo?.kernelVersion == "5.15.0-91-generic")
+        #expect(sysInfo?.architecture == "x86_64")
+        #expect(sysInfo?.hostname == "webserver01")
+    }
+
+    @Test func parseSystemInfoDebian() async {
+        let sshService = SSHService()
+        let output = """
+        NAME="Debian GNU/Linux"
+        VERSION_ID="12"
+        KERNEL=6.1.0-17-amd64
+        ARCH=x86_64
+        HOSTNAME=db-server
+        """
+
+        let sysInfo = await sshService.parseSystemInfo(output)
+
+        #expect(sysInfo != nil)
+        #expect(sysInfo?.osName == "Debian GNU/Linux")
+        #expect(sysInfo?.osVersion == "12")
+        #expect(sysInfo?.displayOS == "Debian GNU/Linux 12")
+    }
+
+    @Test func parseSystemInfoCentOS() async {
+        let sshService = SSHService()
+        let output = """
+        NAME="CentOS Stream"
+        VERSION_ID="9"
+        KERNEL=5.14.0-391.el9.x86_64
+        ARCH=x86_64
+        HOSTNAME=app-server
+        """
+
+        let sysInfo = await sshService.parseSystemInfo(output)
+
+        #expect(sysInfo != nil)
+        #expect(sysInfo?.osName == "CentOS Stream")
+        #expect(sysInfo?.osVersion == "9")
+    }
+
+    @Test func parseSystemInfoARM() async {
+        let sshService = SSHService()
+        let output = """
+        NAME="Ubuntu"
+        VERSION_ID="24.04"
+        KERNEL=6.5.0-1010-aws
+        ARCH=aarch64
+        HOSTNAME=arm-server
+        """
+
+        let sysInfo = await sshService.parseSystemInfo(output)
+
+        #expect(sysInfo != nil)
+        #expect(sysInfo?.architecture == "aarch64")
+    }
+
+    @Test func parseSystemInfoShortKernel() async {
+        let sshService = SSHService()
+        let output = """
+        NAME="Ubuntu"
+        VERSION_ID="22.04"
+        KERNEL=5.15.0-91-generic
+        ARCH=x86_64
+        HOSTNAME=server
+        """
+
+        let sysInfo = await sshService.parseSystemInfo(output)
+
+        #expect(sysInfo != nil)
+        #expect(sysInfo?.shortKernel == "5.15.0")
+    }
+
+    @Test func parseSystemInfoDisplayOSNoVersion() async {
+        let sshService = SSHService()
+        let output = """
+        NAME="Alpine Linux"
+        KERNEL=6.1.0
+        ARCH=x86_64
+        HOSTNAME=container
+        """
+
+        let sysInfo = await sshService.parseSystemInfo(output)
+
+        #expect(sysInfo != nil)
+        #expect(sysInfo?.displayOS == "Alpine Linux")
+    }
+
+    @Test func parseSystemInfoEmptyOutput() async {
+        let sshService = SSHService()
+        let sysInfo = await sshService.parseSystemInfo("")
+
+        #expect(sysInfo == nil)
+    }
+
+    @Test func parseSystemInfoMinimalOutput() async {
+        let sshService = SSHService()
+        let output = "KERNEL=5.15.0"
+
+        let sysInfo = await sshService.parseSystemInfo(output)
+
+        #expect(sysInfo != nil)
+        #expect(sysInfo?.kernelVersion == "5.15.0")
+    }
+}
+
+// MARK: - New Model Tests
+
+struct NewModelTests {
+
+    // MARK: - SwapStats Tests
+
+    @Test func swapStatsUsagePercent() {
+        let swap = SwapStats(totalMB: 2048, usedMB: 512, freeMB: 1536)
+
+        #expect(swap.usagePercent == 25.0)
+    }
+
+    @Test func swapStatsUsagePercentZeroTotal() {
+        let swap = SwapStats(totalMB: 0, usedMB: 0, freeMB: 0)
+
+        #expect(swap.usagePercent == 0)
+    }
+
+    @Test func swapStatsIsActive() {
+        let activeSwap = SwapStats(totalMB: 2048, usedMB: 100, freeMB: 1948)
+        let inactiveSwap = SwapStats(totalMB: 2048, usedMB: 0, freeMB: 2048)
+
+        #expect(activeSwap.isActive == true)
+        #expect(inactiveSwap.isActive == false)
+    }
+
+    // MARK: - NetworkStats Tests
+
+    @Test func networkStatsDisplayBytes() {
+        let network = NetworkStats(bytesIn: 1073741824, bytesOut: 536870912) // 1GB, 512MB
+
+        #expect(network.displayBytesIn == "1.0 GB")
+        #expect(network.displayBytesOut == "512.0 MB")
+    }
+
+    // MARK: - UptimeStats Tests
+
+    @Test func uptimeStatsDaysHoursMinutes() {
+        let uptime = UptimeStats(totalSeconds: 185100) // 2d 3h 45m
+
+        #expect(uptime.days == 2)
+        #expect(uptime.hours == 3)
+        #expect(uptime.minutes == 45)
+    }
+
+    @Test func uptimeStatsDisplayString() {
+        let longUptime = UptimeStats(totalSeconds: 185100) // 2d 3h 45m
+        let mediumUptime = UptimeStats(totalSeconds: 7500) // 2h 5m
+        let shortUptime = UptimeStats(totalSeconds: 1800) // 30m
+
+        #expect(longUptime.displayString == "2d 3h 45m")
+        #expect(mediumUptime.displayString == "2h 5m")
+        #expect(shortUptime.displayString == "30m")
+    }
+
+    @Test func uptimeStatsShortDisplayString() {
+        let longUptime = UptimeStats(totalSeconds: 185100)
+        let mediumUptime = UptimeStats(totalSeconds: 7500)
+        let shortUptime = UptimeStats(totalSeconds: 1800)
+
+        #expect(longUptime.shortDisplayString == "2d")
+        #expect(mediumUptime.shortDisplayString == "2h")
+        #expect(shortUptime.shortDisplayString == "30m")
+    }
+
+    // MARK: - SystemInfo Tests
+
+    @Test func systemInfoDisplayOS() {
+        let withVersion = SystemInfo(osName: "Ubuntu", osVersion: "22.04", kernelVersion: "5.15.0", hostname: "server", architecture: "x86_64")
+        let withoutVersion = SystemInfo(osName: "Alpine Linux", osVersion: "", kernelVersion: "6.1.0", hostname: "container", architecture: "x86_64")
+
+        #expect(withVersion.displayOS == "Ubuntu 22.04")
+        #expect(withoutVersion.displayOS == "Alpine Linux")
+    }
+
+    @Test func systemInfoShortKernel() {
+        let sysInfo = SystemInfo(osName: "Ubuntu", osVersion: "22.04", kernelVersion: "5.15.0-91-generic", hostname: "server", architecture: "x86_64")
+
+        #expect(sysInfo.shortKernel == "5.15.0")
+    }
+
+    // MARK: - ServiceStatus Uptime Tests
+
+    @Test func serviceStatusUptimeDisplay() {
+        let withUptime = ServiceStatus(serviceId: UUID(), isRunning: true, uptimeSeconds: 185100)
+        let withoutUptime = ServiceStatus(serviceId: UUID(), isRunning: true, uptimeSeconds: nil)
+        let shortUptime = ServiceStatus(serviceId: UUID(), isRunning: true, uptimeSeconds: 1800)
+
+        #expect(withUptime.uptimeDisplay == "2d 3h")
+        #expect(withoutUptime.uptimeDisplay == nil)
+        #expect(shortUptime.uptimeDisplay == "30m")
+    }
+}
