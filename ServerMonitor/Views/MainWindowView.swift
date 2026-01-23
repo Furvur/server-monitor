@@ -7,11 +7,21 @@ import SwiftUI
 
 struct MainWindowView: View {
     @EnvironmentObject var monitorService: MonitorService
-    @State private var selectedServer: Server?
+    @State private var selectedServerIDs: Set<UUID> = []
+    @State private var lastSelectedID: UUID?  // For shift-click range selection
     @State private var showingAddServer = false
     @State private var serverToEdit: Server?
-    @State private var serverToDelete: Server?
     @State private var showingDeleteConfirmation = false
+
+    private var selectedServer: Server? {
+        // For detail view, show the most recently selected server
+        guard let lastID = lastSelectedID ?? selectedServerIDs.first else { return nil }
+        return monitorService.servers.first { $0.id == lastID }
+    }
+
+    private var selectedServers: [Server] {
+        monitorService.servers.filter { selectedServerIDs.contains($0.id) }
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -54,7 +64,8 @@ struct MainWindowView: View {
         .sheet(isPresented: $showingAddServer) {
             ServerFormView(mode: .add) { newServer in
                 monitorService.addServer(newServer)
-                selectedServer = newServer
+                selectedServerIDs = [newServer.id]
+                lastSelectedID = newServer.id
                 Task {
                     await monitorService.refreshServer(newServer)
                 }
@@ -63,27 +74,30 @@ struct MainWindowView: View {
         .sheet(item: $serverToEdit) { server in
             ServerFormView(mode: .edit(server)) { updatedServer in
                 monitorService.updateServer(updatedServer)
-                if selectedServer?.id == updatedServer.id {
-                    selectedServer = updatedServer
-                }
             }
         }
-        .alert("Delete Server", isPresented: $showingDeleteConfirmation) {
-            Button("Cancel", role: .cancel) {
-                serverToDelete = nil
-            }
+        .alert(
+            selectedServers.count == 1 ? "Delete Server" : "Delete \(selectedServers.count) Servers",
+            isPresented: $showingDeleteConfirmation
+        ) {
+            Button("Cancel", role: .cancel) { }
             Button("Delete", role: .destructive) {
-                if let server = serverToDelete {
-                    if selectedServer?.id == server.id {
-                        selectedServer = nil
-                    }
+                for server in selectedServers {
                     monitorService.deleteServer(server)
                 }
-                serverToDelete = nil
+                selectedServerIDs.removeAll()
+                lastSelectedID = nil
             }
         } message: {
-            if let server = serverToDelete {
+            if selectedServers.count == 1, let server = selectedServers.first {
                 Text("Are you sure you want to delete \"\(server.name)\"?")
+            } else {
+                Text("Are you sure you want to delete \(selectedServers.count) servers?")
+            }
+        }
+        .onDeleteCommand {
+            if !selectedServerIDs.isEmpty {
+                showingDeleteConfirmation = true
             }
         }
     }
@@ -114,11 +128,37 @@ struct MainWindowView: View {
                         ServerSidebarRow(
                             server: server,
                             stats: monitorService.stats[server.id],
-                            isSelected: selectedServer?.id == server.id
+                            isSelected: selectedServerIDs.contains(server.id)
                         )
                         .tag(server)
+                        .gesture(
+                            TapGesture()
+                                .modifiers(.command)
+                                .onEnded { _ in
+                                    // Command-click: toggle selection
+                                    if selectedServerIDs.contains(server.id) {
+                                        selectedServerIDs.remove(server.id)
+                                        if lastSelectedID == server.id {
+                                            lastSelectedID = selectedServerIDs.first
+                                        }
+                                    } else {
+                                        selectedServerIDs.insert(server.id)
+                                        lastSelectedID = server.id
+                                    }
+                                }
+                        )
+                        .gesture(
+                            TapGesture()
+                                .modifiers(.shift)
+                                .onEnded { _ in
+                                    // Shift-click: range selection
+                                    selectRange(to: server.id)
+                                }
+                        )
                         .onTapGesture {
-                            selectedServer = server
+                            // Regular click: single selection
+                            selectedServerIDs = [server.id]
+                            lastSelectedID = server.id
                         }
                         .contextMenu {
                             Button {
@@ -137,11 +177,20 @@ struct MainWindowView: View {
 
                             Divider()
 
-                            Button(role: .destructive) {
-                                serverToDelete = server
-                                showingDeleteConfirmation = true
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                            if selectedServerIDs.count > 1 && selectedServerIDs.contains(server.id) {
+                                Button(role: .destructive) {
+                                    showingDeleteConfirmation = true
+                                } label: {
+                                    Label("Delete \(selectedServerIDs.count) Servers", systemImage: "trash")
+                                }
+                            } else {
+                                Button(role: .destructive) {
+                                    selectedServerIDs = [server.id]
+                                    lastSelectedID = server.id
+                                    showingDeleteConfirmation = true
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
                     }
@@ -161,7 +210,23 @@ struct MainWindowView: View {
                 .buttonStyle(.plain)
                 .help("Add Server")
 
+                if !selectedServerIDs.isEmpty {
+                    Button(action: { showingDeleteConfirmation = true }) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 14))
+                            .foregroundColor(DSDarkTheme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Delete Selected (\(selectedServerIDs.count))")
+                }
+
                 Spacer()
+
+                if selectedServerIDs.count > 1 {
+                    Text("\(selectedServerIDs.count) selected")
+                        .font(DSTypography.caption)
+                        .foregroundColor(DSDarkTheme.textTertiary)
+                }
 
                 Button(action: {
                     NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
@@ -178,6 +243,30 @@ struct MainWindowView: View {
         .frame(minWidth: 280)
         .background(DSDarkTheme.surface)
         .navigationTitle("Servers")
+    }
+
+    // MARK: - Selection Helpers
+
+    private func selectRange(to targetID: UUID) {
+        let servers = monitorService.servers
+        guard let targetIndex = servers.firstIndex(where: { $0.id == targetID }) else { return }
+
+        // If no previous selection, just select the target
+        guard let lastID = lastSelectedID,
+              let lastIndex = servers.firstIndex(where: { $0.id == lastID }) else {
+            selectedServerIDs = [targetID]
+            lastSelectedID = targetID
+            return
+        }
+
+        // Select range between last selected and target
+        let startIndex = min(lastIndex, targetIndex)
+        let endIndex = max(lastIndex, targetIndex)
+
+        for index in startIndex...endIndex {
+            selectedServerIDs.insert(servers[index].id)
+        }
+        lastSelectedID = targetID
     }
 
     @ViewBuilder
