@@ -140,9 +140,16 @@ actor SSHService {
 
     private func buildCommand(for server: Server) -> String {
         var commands = [
+            // Basic system stats
             "echo '===UPTIME===' && uptime",
+            "echo '===UPTIME_SECONDS===' && cat /proc/uptime 2>/dev/null | cut -d' ' -f1 || sysctl -n kern.boottime 2>/dev/null",
             "echo '===MEMORY===' && free -m 2>/dev/null || vm_stat",
-            "echo '===DISK===' && df -h /"
+            "echo '===SWAP===' && free -m 2>/dev/null | grep -i swap || swapon --show --bytes 2>/dev/null",
+            "echo '===DISK===' && df -h /",
+            // Network stats (Linux)
+            "echo '===NETWORK===' && cat /proc/net/dev 2>/dev/null | grep -E 'eth0|ens|enp|wlan|bond' | head -1 || netstat -ib 2>/dev/null | grep -E 'en0|eth0' | head -1",
+            // System info
+            "echo '===SYSINFO===' && (cat /etc/os-release 2>/dev/null | grep -E '^(NAME|VERSION_ID)=' || sw_vers 2>/dev/null) && echo \"KERNEL=$(uname -r)\" && echo \"ARCH=$(uname -m)\" && echo \"HOSTNAME=$(hostname)\""
         ]
 
         // Add service check commands
@@ -239,10 +246,18 @@ actor SSHService {
 
             if sectionHeader == "UPTIME" {
                 stats.cpuLoad = parseUptime(sectionContent)
+            } else if sectionHeader == "UPTIME_SECONDS" {
+                stats.uptime = parseUptimeSeconds(sectionContent)
             } else if sectionHeader == "MEMORY" {
                 stats.memory = parseMemory(sectionContent)
+            } else if sectionHeader == "SWAP" {
+                stats.swap = parseSwap(sectionContent)
             } else if sectionHeader == "DISK" {
                 stats.disk = parseDisk(sectionContent)
+            } else if sectionHeader == "NETWORK" {
+                stats.network = parseNetwork(sectionContent)
+            } else if sectionHeader == "SYSINFO" {
+                stats.systemInfo = parseSystemInfo(sectionContent)
             } else if sectionHeader.hasPrefix("SERVICE:") {
                 let uuidString = String(sectionHeader.dropFirst("SERVICE:".count))
                 if let serviceId = UUID(uuidString: uuidString),
@@ -430,6 +445,143 @@ actor SSHService {
         if str.hasSuffix("M") { return value / 1024 }
         if str.hasSuffix("K") { return value / (1024 * 1024) }
         return value
+    }
+
+    // MARK: - New Parsing Methods
+
+    func parseUptimeSeconds(_ output: String) -> UptimeStats? {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Linux: /proc/uptime gives seconds directly (e.g., "123456.78 234567.89")
+        if let seconds = Double(trimmed.components(separatedBy: " ").first ?? "") {
+            return UptimeStats(totalSeconds: Int(seconds))
+        }
+
+        // macOS: sysctl gives boot time as "{ sec = 1234567890, usec = 123456 }"
+        if trimmed.contains("sec =") {
+            if let secRange = trimmed.range(of: "sec = "),
+               let endRange = trimmed[secRange.upperBound...].range(of: ",") {
+                let secString = String(trimmed[secRange.upperBound..<endRange.lowerBound])
+                if let bootTime = Double(secString.trimmingCharacters(in: .whitespaces)) {
+                    let uptime = Date().timeIntervalSince1970 - bootTime
+                    return UptimeStats(totalSeconds: Int(uptime))
+                }
+            }
+        }
+
+        return nil
+    }
+
+    func parseSwap(_ output: String) -> SwapStats? {
+        let lines = output.components(separatedBy: .newlines)
+
+        for line in lines {
+            let lowercased = line.lowercased()
+            // Parse "Swap: total used free" format from free -m
+            if lowercased.starts(with: "swap:") {
+                let parts = line.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+                if parts.count >= 4,
+                   let total = Int(parts[1]),
+                   let used = Int(parts[2]),
+                   let free = Int(parts[3]) {
+                    return SwapStats(totalMB: total, usedMB: used, freeMB: free)
+                }
+            }
+        }
+
+        return SwapStats(totalMB: 0, usedMB: 0, freeMB: 0)
+    }
+
+    func parseNetwork(_ output: String) -> NetworkStats? {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Linux /proc/net/dev format:
+        // interface: rx_bytes rx_packets ... tx_bytes tx_packets ...
+        // Columns: 1=rx_bytes, 9=tx_bytes (0-indexed after interface name)
+        let parts = trimmed.components(separatedBy: CharacterSet.whitespaces).filter { !$0.isEmpty }
+
+        // Remove interface name (ends with ":")
+        let numbers = parts.filter { !$0.contains(":") }
+
+        if numbers.count >= 9,
+           let bytesIn = UInt64(numbers[0]),
+           let bytesOut = UInt64(numbers[8]) {
+            return NetworkStats(bytesIn: bytesIn, bytesOut: bytesOut)
+        }
+
+        // macOS netstat -ib format: Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes
+        // Columns: 6=Ibytes (rx), 9=Obytes (tx) (0-indexed)
+        if numbers.count >= 10,
+           let bytesIn = UInt64(numbers[6]),
+           let bytesOut = UInt64(numbers[9]) {
+            return NetworkStats(bytesIn: bytesIn, bytesOut: bytesOut)
+        }
+
+        return nil
+    }
+
+    func parseSystemInfo(_ output: String) -> SystemInfo? {
+        var osName = "Linux"
+        var osVersion = ""
+        var kernelVersion = ""
+        var hostname = ""
+        var architecture = ""
+
+        let lines = output.components(separatedBy: .newlines)
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            // Parse /etc/os-release format
+            if trimmed.hasPrefix("NAME=") {
+                osName = trimmed
+                    .replacingOccurrences(of: "NAME=", with: "")
+                    .replacingOccurrences(of: "\"", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("VERSION_ID=") {
+                osVersion = trimmed
+                    .replacingOccurrences(of: "VERSION_ID=", with: "")
+                    .replacingOccurrences(of: "\"", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+            }
+            // Parse our custom output
+            else if trimmed.hasPrefix("KERNEL=") {
+                kernelVersion = trimmed
+                    .replacingOccurrences(of: "KERNEL=", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("ARCH=") {
+                architecture = trimmed
+                    .replacingOccurrences(of: "ARCH=", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("HOSTNAME=") {
+                hostname = trimmed
+                    .replacingOccurrences(of: "HOSTNAME=", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+            }
+            // macOS sw_vers format
+            else if trimmed.hasPrefix("ProductName:") {
+                osName = trimmed
+                    .replacingOccurrences(of: "ProductName:", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("ProductVersion:") {
+                osVersion = trimmed
+                    .replacingOccurrences(of: "ProductVersion:", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        // Only return if we got meaningful data
+        guard !kernelVersion.isEmpty || !osName.isEmpty else {
+            return nil
+        }
+
+        return SystemInfo(
+            osName: osName,
+            osVersion: osVersion,
+            kernelVersion: kernelVersion,
+            hostname: hostname,
+            architecture: architecture
+        )
     }
 }
 

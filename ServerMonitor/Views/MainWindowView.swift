@@ -749,59 +749,48 @@ struct ServerDetailView: View {
     }
 
     private var headerSection: some View {
-        HStack(spacing: DSSpacing.lg) {
-            // Server avatar
-            ZStack {
-                RoundedRectangle(cornerRadius: DSRadius.md)
-                    .fill(DSDarkTheme.accentGradient)
-                    .frame(width: 64, height: 64)
+        VStack(alignment: .leading, spacing: DSSpacing.md) {
+            // Top row: Name, connection info, and actions
+            HStack(spacing: DSSpacing.md) {
+                VStack(alignment: .leading, spacing: DSSpacing.xxxs) {
+                    Text(server.name)
+                        .font(DSTypography.title3)
+                        .fontWeight(.semibold)
+                        .foregroundColor(DSDarkTheme.textPrimary)
+                        .lineLimit(1)
 
-                Text(String(server.name.prefix(2)).uppercased())
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-            }
+                    HStack(spacing: DSSpacing.xs) {
+                        Text("\(server.username)@\(server.host)")
+                            .font(DSTypography.caption)
+                            .foregroundColor(DSDarkTheme.textSecondary)
 
-            VStack(alignment: .leading, spacing: DSSpacing.xxs) {
-                Text(server.name)
-                    .font(DSTypography.title2)
-                    .fontWeight(.semibold)
-                    .foregroundColor(DSDarkTheme.textPrimary)
+                        if server.port != 22 {
+                            Text(":\(server.port)")
+                                .font(DSTypography.caption)
+                                .foregroundColor(DSDarkTheme.textTertiary)
+                        }
+                    }
+                    .lineLimit(1)
+                }
 
-                Text("\(server.username)@\(server.host)")
-                    .font(DSTypography.subheadline)
-                    .foregroundColor(DSDarkTheme.textSecondary)
+                Spacer(minLength: DSSpacing.sm)
 
-                HStack(spacing: DSSpacing.sm) {
-                    // Status badge
+                // Uptime badge (if online)
+                if let uptime = stats.uptime {
                     HStack(spacing: DSSpacing.xxs) {
-                        Circle()
-                            .fill(statusColor)
-                            .frame(width: 6, height: 6)
-                        Text(stats.status.rawValue)
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 10))
+                        Text(uptime.displayString)
                             .font(.system(size: 11, weight: .medium))
                     }
-                    .foregroundColor(statusColor)
+                    .foregroundColor(DSDarkTheme.textSecondary)
                     .padding(.horizontal, DSSpacing.sm)
                     .padding(.vertical, DSSpacing.xxs)
-                    .background(statusColor.opacity(0.15))
+                    .background(DSDarkTheme.surfaceHover)
                     .cornerRadius(DSRadius.sm)
-
-                    if !server.enabledServices.isEmpty {
-                        Text("\(stats.runningServicesCount)/\(stats.totalServicesCount) services")
-                            .font(DSTypography.caption)
-                            .foregroundColor(DSDarkTheme.textTertiary)
-                    }
-
-                    Text("Updated: \(stats.lastUpdated.formatted(.relative(presentation: .named)))")
-                        .font(DSTypography.caption)
-                        .foregroundColor(DSDarkTheme.textTertiary)
                 }
-            }
 
-            Spacer()
-
-            // Quick actions
-            VStack(spacing: DSSpacing.sm) {
+                // Quick action button
                 Button {
                     // Terminal action placeholder
                 } label: {
@@ -819,10 +808,66 @@ struct ServerDetailView: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            // System info row
+            if let sysInfo = stats.systemInfo {
+                HStack(spacing: DSSpacing.md) {
+                    // OS badge
+                    InfoBadge(icon: "desktopcomputer", text: sysInfo.displayOS)
+
+                    // Kernel badge
+                    if !sysInfo.kernelVersion.isEmpty {
+                        InfoBadge(icon: "gearshape.2", text: sysInfo.shortKernel)
+                    }
+
+                    // Architecture badge
+                    if !sysInfo.architecture.isEmpty {
+                        InfoBadge(icon: "cpu", text: sysInfo.architecture)
+                    }
+                }
+            }
+
+            // Status row: badges that can wrap
+            FlowLayout(spacing: DSSpacing.sm) {
+                // Status badge
+                HStack(spacing: DSSpacing.xxs) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+                    Text(stats.status.rawValue)
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(statusColor)
+                .padding(.horizontal, DSSpacing.sm)
+                .padding(.vertical, DSSpacing.xxs)
+                .background(statusColor.opacity(0.15))
+                .cornerRadius(DSRadius.sm)
+
+                Text("Updated: \(stats.lastUpdated.formatted(.relative(presentation: .named)))")
+                    .font(DSTypography.caption)
+                    .foregroundColor(DSDarkTheme.textTertiary)
+                    .padding(.vertical, DSSpacing.xxs)
+            }
         }
-        .padding(DSSpacing.lg)
+        .padding(DSSpacing.md)
         .background(DSDarkTheme.surface)
         .cornerRadius(DSRadius.lg)
+    }
+
+    // Helper view for system info badges
+    private struct InfoBadge: View {
+        let icon: String
+        let text: String
+
+        var body: some View {
+            HStack(spacing: DSSpacing.xxs) {
+                Image(systemName: icon)
+                    .font(.system(size: 10))
+                Text(text)
+                    .font(.system(size: 11))
+            }
+            .foregroundColor(DSDarkTheme.textTertiary)
+        }
     }
 
     private var statusSection: some View {
@@ -848,34 +893,96 @@ struct ServerDetailView: View {
     }
 
     private var statsSection: some View {
-        VStack(spacing: 16) {
-            if let cpu = stats.cpuLoad {
-                StatCard(
-                    title: "CPU Load",
-                    icon: "cpu",
-                    value: cpu.displayString,
-                    detail: "1 min / 5 min / 15 min averages"
+        VStack(spacing: DSSpacing.md) {
+            // Threshold warnings
+            if let memory = stats.memory, memory.usagePercent >= 80 {
+                ThresholdWarning(
+                    title: memory.usagePercent >= 90 ? "Critical Memory Usage" : "High Memory Usage",
+                    message: "Memory is at \(Int(memory.usagePercent))%. Consider freeing up memory.",
+                    severity: memory.usagePercent >= 90 ? .critical : .warning
                 )
             }
 
-            if let memory = stats.memory {
-                StatCard(
-                    title: "Memory",
-                    icon: "memorychip",
-                    value: memory.displayString,
-                    detail: "Used / Total",
-                    progress: memory.usagePercent / 100
+            if let disk = stats.disk, disk.usagePercent >= 80 {
+                ThresholdWarning(
+                    title: disk.usagePercent >= 90 ? "Critical Disk Usage" : "High Disk Usage",
+                    message: "Disk is at \(Int(disk.usagePercent))%. Consider cleaning up files.",
+                    severity: disk.usagePercent >= 90 ? .critical : .warning
                 )
             }
 
-            if let disk = stats.disk {
-                StatCard(
-                    title: "Disk",
-                    icon: "internaldrive",
-                    value: disk.displayString,
-                    detail: "Used / Total",
-                    progress: disk.usagePercent / 100
+            if let swap = stats.swap, swap.isActive && swap.usagePercent >= 50 {
+                ThresholdWarning(
+                    title: "Swap In Use",
+                    message: "System is using swap (\(Int(swap.usagePercent))%). This may indicate memory pressure.",
+                    severity: swap.usagePercent >= 80 ? .warning : .info
                 )
+            }
+
+            // Stats grid
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: DSSpacing.md) {
+                // CPU Load
+                if let cpu = stats.cpuLoad {
+                    CompactStatCard(
+                        title: "CPU Load",
+                        icon: "cpu",
+                        value: String(format: "%.2f", cpu.load1),
+                        detail: String(format: "%.2f / %.2f", cpu.load5, cpu.load15)
+                    )
+                }
+
+                // Memory
+                if let memory = stats.memory {
+                    CompactStatCard(
+                        title: "Memory",
+                        icon: "memorychip",
+                        value: String(format: "%.0f%%", memory.usagePercent),
+                        detail: memory.displayString,
+                        progress: memory.usagePercent / 100
+                    )
+                }
+
+                // Disk
+                if let disk = stats.disk {
+                    CompactStatCard(
+                        title: "Disk",
+                        icon: "internaldrive",
+                        value: String(format: "%.0f%%", disk.usagePercent),
+                        detail: disk.displayString,
+                        progress: disk.usagePercent / 100
+                    )
+                }
+
+                // Swap
+                if let swap = stats.swap, swap.totalMB > 0 {
+                    CompactStatCard(
+                        title: "Swap",
+                        icon: "arrow.left.arrow.right",
+                        value: swap.isActive ? String(format: "%.0f%%", swap.usagePercent) : "Idle",
+                        detail: swap.displayString,
+                        progress: swap.usagePercent / 100
+                    )
+                }
+
+                // Network In
+                if let network = stats.network {
+                    CompactStatCard(
+                        title: "Net In",
+                        icon: "arrow.down.circle",
+                        value: network.displayBytesIn,
+                        detail: "Total received"
+                    )
+                }
+
+                // Network Out
+                if let network = stats.network {
+                    CompactStatCard(
+                        title: "Net Out",
+                        icon: "arrow.up.circle",
+                        value: network.displayBytesOut,
+                        detail: "Total sent"
+                    )
+                }
             }
         }
     }
@@ -912,6 +1019,7 @@ struct ServiceStatusCard: View {
     let service: ServiceDefinition
     let status: ServiceStatus?
     @State private var isExpanded = false
+    @State private var showingActions = false
 
     private var isRunning: Bool {
         status?.isRunning ?? false
@@ -924,68 +1032,119 @@ struct ServiceStatusCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Main service row
-            HStack {
+            HStack(spacing: DSSpacing.sm) {
                 Image(systemName: service.icon)
-                    .font(.title3)
-                    .foregroundColor(isRunning ? .green : .secondary)
+                    .font(.system(size: 16))
+                    .foregroundColor(isRunning ? DSDarkTheme.online : DSDarkTheme.textTertiary)
                     .frame(width: 24)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(service.name)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+                    HStack(spacing: DSSpacing.sm) {
+                        Text(service.name)
+                            .font(DSTypography.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundColor(DSDarkTheme.textPrimary)
+
+                        // Service uptime
+                        if let uptimeStr = status?.uptimeDisplay {
+                            Text("• \(uptimeStr)")
+                                .font(DSTypography.caption)
+                                .foregroundColor(DSDarkTheme.textTertiary)
+                        }
+                    }
 
                     if let details = status?.details {
                         Text(details)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            .font(DSTypography.caption)
+                            .foregroundColor(DSDarkTheme.textSecondary)
                     }
                 }
 
                 Spacer()
 
-                // Status indicator
-                HStack(spacing: 4) {
+                // Status badge
+                HStack(spacing: DSSpacing.xxs) {
                     Circle()
-                        .fill(isRunning ? Color.green : Color.red)
-                        .frame(width: 8, height: 8)
+                        .fill(isRunning ? DSDarkTheme.online : DSDarkTheme.offline)
+                        .frame(width: 6, height: 6)
                     Text(isRunning ? "Running" : "Stopped")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 11, weight: .medium))
                 }
+                .foregroundColor(isRunning ? DSDarkTheme.online : DSDarkTheme.offline)
+                .padding(.horizontal, DSSpacing.sm)
+                .padding(.vertical, DSSpacing.xxs)
+                .background((isRunning ? DSDarkTheme.online : DSDarkTheme.offline).opacity(0.15))
+                .cornerRadius(DSRadius.sm)
+
+                // Actions menu
+                Menu {
+                    Button {
+                        // Restart action placeholder
+                    } label: {
+                        Label("Restart", systemImage: "arrow.clockwise")
+                    }
+
+                    Button {
+                        // View logs action placeholder
+                    } label: {
+                        Label("View Logs", systemImage: "doc.text")
+                    }
+
+                    if !isRunning {
+                        Button {
+                            // Start action placeholder
+                        } label: {
+                            Label("Start", systemImage: "play.fill")
+                        }
+                    } else {
+                        Button(role: .destructive) {
+                            // Stop action placeholder
+                        } label: {
+                            Label("Stop", systemImage: "stop.fill")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 14))
+                        .foregroundColor(DSDarkTheme.textTertiary)
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 24)
 
                 // Expand button for Docker containers
                 if hasContainers {
                     Button {
-                        withAnimation {
+                        withAnimation(.easeInOut(duration: 0.2)) {
                             isExpanded.toggle()
                         }
                     } label: {
                         Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            .font(.system(size: 12))
+                            .foregroundColor(DSDarkTheme.textTertiary)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(12)
+            .padding(DSSpacing.sm)
 
             // Docker containers list (expandable)
             if hasContainers && isExpanded {
-                Divider()
+                Divider().background(DSDarkTheme.divider)
+
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(status?.containers ?? []) { container in
                         ContainerRow(container: container)
                         if container.id != status?.containers?.last?.id {
                             Divider()
+                                .background(DSDarkTheme.divider)
                                 .padding(.leading, 36)
                         }
                     }
                 }
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(8)
+        .background(DSDarkTheme.surface)
+        .cornerRadius(DSRadius.md)
     }
 }
 
@@ -995,46 +1154,52 @@ struct ContainerRow: View {
     let container: DockerContainer
 
     var body: some View {
-        HStack {
+        HStack(spacing: DSSpacing.sm) {
             Image(systemName: container.state.icon)
-                .font(.caption)
+                .font(.system(size: 12))
                 .foregroundColor(stateColor)
-                .frame(width: 24)
+                .frame(width: 20)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(container.name)
-                    .font(.caption)
+                    .font(DSTypography.caption)
                     .fontWeight(.medium)
+                    .foregroundColor(DSDarkTheme.textPrimary)
 
                 Text(container.displayImage)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 10))
+                    .foregroundColor(DSDarkTheme.textTertiary)
             }
 
             Spacer()
 
             VStack(alignment: .trailing, spacing: 2) {
+                // State badge
                 Text(container.state.displayName)
-                    .font(.caption)
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundColor(stateColor)
+                    .padding(.horizontal, DSSpacing.xs)
+                    .padding(.vertical, 2)
+                    .background(stateColor.opacity(0.15))
+                    .cornerRadius(DSRadius.sm)
 
                 Text(container.status)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 10))
+                    .foregroundColor(DSDarkTheme.textTertiary)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .padding(.horizontal, DSSpacing.sm)
+        .padding(.vertical, DSSpacing.xs)
+        .background(DSDarkTheme.surfaceHover.opacity(0.5))
     }
 
     private var stateColor: Color {
         switch container.state {
-        case .running: return .green
-        case .exited: return .gray
+        case .running: return DSDarkTheme.online
+        case .exited: return DSDarkTheme.textTertiary
         case .paused: return .yellow
         case .restarting: return .orange
-        case .dead, .removing: return .red
+        case .dead, .removing: return DSDarkTheme.offline
         case .created: return .blue
         }
     }
@@ -1091,6 +1256,175 @@ struct StatCard: View {
             Spacer()
         }
         .padding(DSSpacing.md)
+        .background(DSDarkTheme.surface)
+        .cornerRadius(DSRadius.md)
+    }
+}
+
+// MARK: - Flow Layout (Wrapping HStack)
+
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = arrangeSubviews(proposal: proposal, subviews: subviews)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = arrangeSubviews(proposal: proposal, subviews: subviews)
+
+        for (index, frame) in result.frames.enumerated() {
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                proposal: ProposedViewSize(frame.size)
+            )
+        }
+    }
+
+    private func arrangeSubviews(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, frames: [CGRect]) {
+        let maxWidth = proposal.width ?? .infinity
+        var frames: [CGRect] = []
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var totalWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+
+            if currentX + size.width > maxWidth && currentX > 0 {
+                // Move to next line
+                currentX = 0
+                currentY += lineHeight + spacing
+                lineHeight = 0
+            }
+
+            frames.append(CGRect(x: currentX, y: currentY, width: size.width, height: size.height))
+
+            lineHeight = max(lineHeight, size.height)
+            currentX += size.width + spacing
+            totalWidth = max(totalWidth, currentX - spacing)
+        }
+
+        totalHeight = currentY + lineHeight
+
+        return (CGSize(width: totalWidth, height: totalHeight), frames)
+    }
+}
+
+// MARK: - Threshold Warning
+
+enum WarningSeverity {
+    case info
+    case warning
+    case critical
+
+    var color: Color {
+        switch self {
+        case .info: return .blue
+        case .warning: return .orange
+        case .critical: return .red
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .info: return "info.circle.fill"
+        case .warning: return "exclamationmark.triangle.fill"
+        case .critical: return "exclamationmark.octagon.fill"
+        }
+    }
+}
+
+struct ThresholdWarning: View {
+    let title: String
+    let message: String
+    let severity: WarningSeverity
+
+    var body: some View {
+        HStack(spacing: DSSpacing.sm) {
+            Image(systemName: severity.icon)
+                .font(.system(size: 16))
+                .foregroundColor(severity.color)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(DSTypography.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(DSDarkTheme.textPrimary)
+
+                Text(message)
+                    .font(DSTypography.caption)
+                    .foregroundColor(DSDarkTheme.textSecondary)
+            }
+
+            Spacer()
+        }
+        .padding(DSSpacing.sm)
+        .background(severity.color.opacity(0.15))
+        .cornerRadius(DSRadius.md)
+        .overlay(
+            RoundedRectangle(cornerRadius: DSRadius.md)
+                .stroke(severity.color.opacity(0.3), lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - Compact Stat Card (Grid-friendly)
+
+struct CompactStatCard: View {
+    let title: String
+    let icon: String
+    let value: String
+    let detail: String
+    var progress: Double? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DSSpacing.xs) {
+            // Header row
+            HStack(spacing: DSSpacing.xs) {
+                Image(systemName: icon)
+                    .font(.system(size: 12))
+                    .foregroundColor(DSDarkTheme.textTertiary)
+
+                Text(title.uppercased())
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(DSDarkTheme.textTertiary)
+
+                Spacer()
+            }
+
+            // Value
+            Text(value)
+                .font(DSTypography.title2)
+                .fontWeight(.semibold)
+                .foregroundColor(DSDarkTheme.textPrimary)
+
+            // Detail
+            Text(detail)
+                .font(.system(size: 11))
+                .foregroundColor(DSDarkTheme.textSecondary)
+                .lineLimit(1)
+
+            // Progress bar (if applicable)
+            if let progress = progress {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(DSDarkTheme.surfaceActive)
+                            .frame(height: 4)
+
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(DSColor.progress(for: progress))
+                            .frame(width: geometry.size.width * min(progress, 1.0), height: 4)
+                    }
+                }
+                .frame(height: 4)
+            }
+        }
+        .padding(DSSpacing.sm)
         .background(DSDarkTheme.surface)
         .cornerRadius(DSRadius.md)
     }

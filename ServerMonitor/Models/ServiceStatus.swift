@@ -10,14 +10,31 @@ struct ServiceStatus: Sendable {
     var isRunning: Bool
     var details: String?          // "3 containers", "2 workers", etc.
     var containers: [DockerContainer]?  // Only for Docker
+    var uptimeSeconds: Int?       // How long the service has been running
     var lastChecked: Date
 
-    init(serviceId: UUID, isRunning: Bool = false, details: String? = nil, containers: [DockerContainer]? = nil) {
+    init(serviceId: UUID, isRunning: Bool = false, details: String? = nil, containers: [DockerContainer]? = nil, uptimeSeconds: Int? = nil) {
         self.serviceId = serviceId
         self.isRunning = isRunning
         self.details = details
         self.containers = containers
+        self.uptimeSeconds = uptimeSeconds
         self.lastChecked = Date()
+    }
+
+    var uptimeDisplay: String? {
+        guard let seconds = uptimeSeconds, seconds > 0 else { return nil }
+        let days = seconds / 86400
+        let hours = (seconds % 86400) / 3600
+        let minutes = (seconds % 3600) / 60
+
+        if days > 0 {
+            return "\(days)d \(hours)h"
+        } else if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else {
+            return "\(minutes)m"
+        }
     }
 }
 
