@@ -44,12 +44,16 @@ struct MainWindowView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button(action: {
                     Task {
-                        await monitorService.refreshAllServers()
+                        if let server = selectedServer {
+                            await monitorService.refreshServer(server)
+                        } else {
+                            await monitorService.refreshAllServers()
+                        }
                     }
                 }) {
                     Image(systemName: "arrow.clockwise")
                 }
-                .help("Refresh all servers (⌘R)")
+                .help(selectedServer != nil ? "Refresh selected server (⌘R)" : "Refresh all servers (⌘R)")
             }
 
             ToolbarItem(placement: .primaryAction) {
@@ -128,7 +132,8 @@ struct MainWindowView: View {
                         ServerSidebarRow(
                             server: server,
                             stats: monitorService.stats[server.id],
-                            isSelected: selectedServerIDs.contains(server.id)
+                            isSelected: selectedServerIDs.contains(server.id),
+                            isRefreshing: monitorService.refreshingServerIDs.contains(server.id)
                         )
                         .tag(server)
                         .gesture(
@@ -273,7 +278,12 @@ struct MainWindowView: View {
     private var detailView: some View {
         if let server = selectedServer,
            let stats = monitorService.stats[server.id] {
-            ServerDetailView(server: server, stats: stats, historyService: monitorService.historyService)
+            ServerDetailView(
+                server: server,
+                stats: stats,
+                historyService: monitorService.historyService,
+                isRefreshing: monitorService.refreshingServerIDs.contains(server.id)
+            )
         } else if monitorService.servers.isEmpty {
             ContentUnavailableView {
                 Label("No Servers", systemImage: "server.rack")
@@ -724,9 +734,14 @@ struct ServerSidebarRow: View {
     let server: Server
     let stats: ServerStats?
     var isSelected: Bool = false
+    var isRefreshing: Bool = false
 
     private var isOnline: Bool {
         stats?.status == .online
+    }
+
+    private var statusColor: Color {
+        isOnline ? DSDarkTheme.online : DSDarkTheme.offline
     }
 
     var body: some View {
@@ -737,13 +752,21 @@ struct ServerSidebarRow: View {
                     .fill(DSDarkTheme.surfaceActive)
                     .frame(width: 36, height: 36)
 
-                Image(systemName: "server.rack")
-                    .font(.system(size: 14))
-                    .foregroundColor(DSDarkTheme.textPrimary)
+                if isRefreshing {
+                    // Show spinner when refreshing
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .progressViewStyle(CircularProgressViewStyle(tint: DSDarkTheme.textSecondary))
+                } else {
+                    Image(systemName: "server.rack")
+                        .font(.system(size: 14))
+                        .foregroundColor(DSDarkTheme.textPrimary)
+                }
 
                 Circle()
-                    .stroke(isOnline ? DSDarkTheme.online : DSDarkTheme.offline, lineWidth: 2)
+                    .stroke(isRefreshing ? DSDarkTheme.textTertiary : statusColor, lineWidth: 2)
                     .frame(width: 36, height: 36)
+                    .opacity(isRefreshing ? 0.5 : 1.0)
             }
 
             // Server info
@@ -761,14 +784,14 @@ struct ServerSidebarRow: View {
 
             Spacer()
 
-            // Status badge
+            // Status badge (always show current status)
             if let stats = stats {
                 Text(stats.status.rawValue)
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(isOnline ? DSDarkTheme.online : DSDarkTheme.offline)
+                    .foregroundColor(statusColor)
                     .padding(.horizontal, DSSpacing.sm)
                     .padding(.vertical, DSSpacing.xxs)
-                    .background((isOnline ? DSDarkTheme.online : DSDarkTheme.offline).opacity(0.15))
+                    .background(statusColor.opacity(0.15))
                     .cornerRadius(DSRadius.sm)
             }
         }
@@ -793,6 +816,7 @@ struct ServerDetailView: View {
     let server: Server
     let stats: ServerStats
     let historyService: HistoryService
+    var isRefreshing: Bool = false
     @State private var selectedTab: DetailTab = .overview
 
     var body: some View {
@@ -918,11 +942,17 @@ struct ServerDetailView: View {
 
             // Status row: badges that can wrap
             FlowLayout(spacing: DSSpacing.sm) {
-                // Status badge
+                // Status badge (always show current status)
                 HStack(spacing: DSSpacing.xxs) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 6, height: 6)
+                    if isRefreshing {
+                        ProgressView()
+                            .scaleEffect(0.4)
+                            .progressViewStyle(CircularProgressViewStyle(tint: statusColor))
+                    } else {
+                        Circle()
+                            .fill(statusColor)
+                            .frame(width: 6, height: 6)
+                    }
                     Text(stats.status.rawValue)
                         .font(.system(size: 11, weight: .medium))
                 }

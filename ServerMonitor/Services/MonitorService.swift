@@ -12,6 +12,7 @@ class MonitorService: ObservableObject {
     @Published var servers: [Server] = []
     @Published var stats: [UUID: ServerStats] = [:]
     @Published var isMonitoring: Bool = false
+    @Published var refreshingServerIDs: Set<UUID> = []
     @Published var refreshInterval: TimeInterval {
         didSet {
             UserDefaults.standard.set(refreshInterval, forKey: "refreshInterval")
@@ -154,6 +155,11 @@ class MonitorService: ObservableObject {
     func refreshAllServers() async {
         let enabledServers = servers.filter { $0.isEnabled }
 
+        // Mark all enabled servers as refreshing
+        for server in enabledServers {
+            refreshingServerIDs.insert(server.id)
+        }
+
         await withTaskGroup(of: ServerStats.self) { group in
             for server in enabledServers {
                 group.addTask {
@@ -163,6 +169,7 @@ class MonitorService: ObservableObject {
 
             for await stat in group {
                 stats[stat.id] = stat
+                refreshingServerIDs.remove(stat.id)
                 // Record snapshot for history
                 if stat.status == .online {
                     recordSnapshot(for: stat)
@@ -186,8 +193,10 @@ class MonitorService: ObservableObject {
     }
 
     func refreshServer(_ server: Server) async {
+        refreshingServerIDs.insert(server.id)
         let stat = await sshService.fetchStats(for: server)
         stats[stat.id] = stat
+        refreshingServerIDs.remove(server.id)
     }
 
     // MARK: - Server Management

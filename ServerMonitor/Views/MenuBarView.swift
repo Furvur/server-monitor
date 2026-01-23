@@ -75,7 +75,8 @@ struct MenuBarView: View {
                 ForEach(monitorService.servers) { server in
                     MenuBarServerRow(
                         server: server,
-                        stats: monitorService.stats[server.id]
+                        stats: monitorService.stats[server.id],
+                        isRefreshing: monitorService.refreshingServerIDs.contains(server.id)
                     )
                 }
             }
@@ -122,19 +123,33 @@ struct MenuBarView: View {
 struct MenuBarServerRow: View {
     let server: Server
     let stats: ServerStats?
+    var isRefreshing: Bool = false
 
     private var isOnline: Bool {
         stats?.status == .online
+    }
+
+    private var statusColor: Color {
+        isOnline ? DSDarkTheme.online : DSDarkTheme.offline
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: DSSpacing.sm) {
             // Header row
             HStack(spacing: DSSpacing.md) {
-                // Status bar
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(isOnline ? DSDarkTheme.online : DSDarkTheme.offline)
-                    .frame(width: 3, height: 40)
+                // Status bar with refresh indicator
+                ZStack {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(statusColor)
+                        .frame(width: 3, height: 40)
+
+                    if isRefreshing {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                            .progressViewStyle(CircularProgressViewStyle(tint: DSDarkTheme.textSecondary))
+                    }
+                }
+                .frame(width: 20)
 
                 // Server info
                 VStack(alignment: .leading, spacing: DSSpacing.xxxs) {
@@ -150,13 +165,13 @@ struct MenuBarServerRow: View {
 
                 Spacer()
 
-                // Status badge
+                // Status badge (always show current status)
                 Text(stats?.status.rawValue ?? "Unknown")
                     .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(isOnline ? DSDarkTheme.online : DSDarkTheme.offline)
+                    .foregroundColor(statusColor)
                     .padding(.horizontal, DSSpacing.sm)
                     .padding(.vertical, DSSpacing.xxs)
-                    .background((isOnline ? DSDarkTheme.online : DSDarkTheme.offline).opacity(0.15))
+                    .background(statusColor.opacity(0.15))
                     .cornerRadius(DSRadius.sm)
             }
 
