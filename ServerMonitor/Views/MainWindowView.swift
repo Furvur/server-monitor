@@ -19,7 +19,9 @@ struct MainWindowView: View {
         } detail: {
             detailView
         }
-        .frame(minWidth: 600, minHeight: 400)
+        .frame(minWidth: 700, minHeight: 500)
+        .background(DSDarkTheme.background)
+        .preferredColorScheme(.dark)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button(action: { showingAddServer = true }) {
@@ -87,48 +89,95 @@ struct MainWindowView: View {
     }
 
     private var sidebar: some View {
-        List(monitorService.servers, selection: $selectedServer) { server in
-            ServerSidebarRow(
-                server: server,
-                stats: monitorService.stats[server.id]
-            )
-            .tag(server)
-            .contextMenu {
-                Button {
-                    serverToEdit = server
-                } label: {
-                    Label("Edit", systemImage: "pencil")
-                }
-
-                Button {
-                    Task {
-                        await monitorService.refreshServer(server)
-                    }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-
-                Divider()
-
-                Button(role: .destructive) {
-                    serverToDelete = server
-                    showingDeleteConfirmation = true
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
+        VStack(spacing: 0) {
+            // Search placeholder
+            HStack(spacing: DSSpacing.sm) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(DSDarkTheme.textTertiary)
+                    .font(.system(size: 13))
+                Text("Search servers...")
+                    .font(DSTypography.subheadline)
+                    .foregroundColor(DSDarkTheme.textTertiary)
+                Spacer()
             }
-        }
-        .listStyle(.sidebar)
-        .frame(minWidth: 200)
-        .navigationTitle("Servers")
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
+            .padding(DSSpacing.sm)
+            .background(DSDarkTheme.surfaceHover)
+            .cornerRadius(DSRadius.sm)
+            .padding(DSSpacing.md)
+
+            Divider().background(DSDarkTheme.divider)
+
+            // Server list
+            ScrollView {
+                LazyVStack(spacing: DSSpacing.sm) {
+                    ForEach(monitorService.servers) { server in
+                        ServerSidebarRow(
+                            server: server,
+                            stats: monitorService.stats[server.id],
+                            isSelected: selectedServer?.id == server.id
+                        )
+                        .tag(server)
+                        .onTapGesture {
+                            selectedServer = server
+                        }
+                        .contextMenu {
+                            Button {
+                                serverToEdit = server
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+
+                            Button {
+                                Task {
+                                    await monitorService.refreshServer(server)
+                                }
+                            } label: {
+                                Label("Refresh", systemImage: "arrow.clockwise")
+                            }
+
+                            Divider()
+
+                            Button(role: .destructive) {
+                                serverToDelete = server
+                                showingDeleteConfirmation = true
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+                .padding(DSSpacing.md)
+            }
+
+            Divider().background(DSDarkTheme.divider)
+
+            // Bottom toolbar
+            HStack {
                 Button(action: { showingAddServer = true }) {
                     Image(systemName: "plus")
+                        .font(.system(size: 14))
+                        .foregroundColor(DSDarkTheme.textSecondary)
                 }
+                .buttonStyle(.plain)
                 .help("Add Server")
+
+                Spacer()
+
+                Button(action: {
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                }) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 14))
+                        .foregroundColor(DSDarkTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .help("Settings")
             }
+            .padding(DSSpacing.md)
         }
+        .frame(minWidth: 280)
+        .background(DSDarkTheme.surface)
+        .navigationTitle("Servers")
     }
 
     @ViewBuilder
@@ -580,38 +629,67 @@ struct ServiceToggleRow: View {
     }
 }
 
-// MARK: - Server Sidebar Row
+// MARK: - Server Sidebar Row (Termius Card Style)
 
 struct ServerSidebarRow: View {
     let server: Server
     let stats: ServerStats?
+    var isSelected: Bool = false
 
-    var body: some View {
-        HStack {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 8, height: 8)
-            VStack(alignment: .leading) {
-                Text(server.name)
-                    .font(.headline)
-                if let stats = stats {
-                    Text(stats.status.rawValue)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-        .padding(.vertical, 2)
+    private var isOnline: Bool {
+        stats?.status == .online
     }
 
-    private var statusColor: Color {
-        guard let stats = stats else { return .gray }
-        switch stats.status {
-        case .online: return .green
-        case .offline, .error: return .red
-        case .connecting: return .yellow
-        case .unknown: return .gray
+    var body: some View {
+        HStack(spacing: DSSpacing.md) {
+            // Server icon with status ring
+            ZStack {
+                Circle()
+                    .fill(DSDarkTheme.surfaceActive)
+                    .frame(width: 36, height: 36)
+
+                Image(systemName: "server.rack")
+                    .font(.system(size: 14))
+                    .foregroundColor(DSDarkTheme.textPrimary)
+
+                Circle()
+                    .stroke(isOnline ? DSDarkTheme.online : DSDarkTheme.offline, lineWidth: 2)
+                    .frame(width: 36, height: 36)
+            }
+
+            // Server info
+            VStack(alignment: .leading, spacing: DSSpacing.xxxs) {
+                Text(server.name)
+                    .font(DSTypography.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(DSDarkTheme.textPrimary)
+
+                Text("\(server.username)@\(server.host)")
+                    .font(DSTypography.caption)
+                    .foregroundColor(DSDarkTheme.textSecondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            // Status badge
+            if let stats = stats {
+                Text(stats.status.rawValue)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(isOnline ? DSDarkTheme.online : DSDarkTheme.offline)
+                    .padding(.horizontal, DSSpacing.sm)
+                    .padding(.vertical, DSSpacing.xxs)
+                    .background((isOnline ? DSDarkTheme.online : DSDarkTheme.offline).opacity(0.15))
+                    .cornerRadius(DSRadius.sm)
+            }
         }
+        .padding(DSSpacing.sm)
+        .background(isSelected ? DSDarkTheme.surfaceActive : DSDarkTheme.surface)
+        .cornerRadius(DSRadius.md)
+        .overlay(
+            RoundedRectangle(cornerRadius: DSRadius.md)
+                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+        )
     }
 }
 
@@ -653,7 +731,7 @@ struct ServerDetailView: View {
 
     private var overviewContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: DSSpacing.lg) {
                 headerSection
                 if stats.status == .online {
                     statsSection
@@ -665,37 +743,86 @@ struct ServerDetailView: View {
                 }
                 Spacer()
             }
-            .padding()
+            .padding(DSSpacing.lg)
         }
+        .background(DSDarkTheme.background)
     }
 
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 12, height: 12)
-                Text(stats.status.rawValue)
-                    .font(.title2)
-                    .fontWeight(.medium)
+        HStack(spacing: DSSpacing.lg) {
+            // Server avatar
+            ZStack {
+                RoundedRectangle(cornerRadius: DSRadius.md)
+                    .fill(DSDarkTheme.accentGradient)
+                    .frame(width: 64, height: 64)
 
-                Spacer()
+                Text(String(server.name.prefix(2)).uppercased())
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+            }
 
-                if !server.enabledServices.isEmpty {
-                    Text("\(stats.runningServicesCount)/\(stats.totalServicesCount) services")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+            VStack(alignment: .leading, spacing: DSSpacing.xxs) {
+                Text(server.name)
+                    .font(DSTypography.title2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(DSDarkTheme.textPrimary)
+
+                Text("\(server.username)@\(server.host)")
+                    .font(DSTypography.subheadline)
+                    .foregroundColor(DSDarkTheme.textSecondary)
+
+                HStack(spacing: DSSpacing.sm) {
+                    // Status badge
+                    HStack(spacing: DSSpacing.xxs) {
+                        Circle()
+                            .fill(statusColor)
+                            .frame(width: 6, height: 6)
+                        Text(stats.status.rawValue)
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(statusColor)
+                    .padding(.horizontal, DSSpacing.sm)
+                    .padding(.vertical, DSSpacing.xxs)
+                    .background(statusColor.opacity(0.15))
+                    .cornerRadius(DSRadius.sm)
+
+                    if !server.enabledServices.isEmpty {
+                        Text("\(stats.runningServicesCount)/\(stats.totalServicesCount) services")
+                            .font(DSTypography.caption)
+                            .foregroundColor(DSDarkTheme.textTertiary)
+                    }
+
+                    Text("Updated: \(stats.lastUpdated.formatted(.relative(presentation: .named)))")
+                        .font(DSTypography.caption)
+                        .foregroundColor(DSDarkTheme.textTertiary)
                 }
             }
 
-            Text("\(server.username)@\(server.host)")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+            Spacer()
 
-            Text("Last updated: \(stats.lastUpdated.formatted())")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            // Quick actions
+            VStack(spacing: DSSpacing.sm) {
+                Button {
+                    // Terminal action placeholder
+                } label: {
+                    HStack(spacing: DSSpacing.xs) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 12))
+                        Text("Terminal")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(DSDarkTheme.textSecondary)
+                    .padding(.horizontal, DSSpacing.md)
+                    .padding(.vertical, DSSpacing.sm)
+                    .background(DSDarkTheme.surfaceHover)
+                    .cornerRadius(DSRadius.sm)
+                }
+                .buttonStyle(.plain)
+            }
         }
+        .padding(DSSpacing.lg)
+        .background(DSDarkTheme.surface)
+        .cornerRadius(DSRadius.lg)
     }
 
     private var statusSection: some View {
@@ -913,7 +1040,7 @@ struct ContainerRow: View {
     }
 }
 
-// MARK: - Stat Card
+// MARK: - Stat Card (Compact Horizontal Style)
 
 struct StatCard: View {
     let title: String
@@ -923,37 +1050,48 @@ struct StatCard: View {
     var progress: Double? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        HStack(spacing: DSSpacing.md) {
+            // Icon circle
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.2))
+                    .frame(width: 48, height: 48)
                 Image(systemName: icon)
-                    .font(.title2)
+                    .font(.system(size: 20))
                     .foregroundColor(.accentColor)
-                Text(title)
-                    .font(.headline)
             }
 
-            Text(value)
-                .font(.title)
-                .fontWeight(.semibold)
+            // Stats
+            VStack(alignment: .leading, spacing: DSSpacing.xxs) {
+                Text(title.uppercased())
+                    .font(DSTypography.caption)
+                    .foregroundColor(DSDarkTheme.textTertiary)
 
-            if let progress = progress {
-                ProgressView(value: progress)
-                    .tint(progressColor(for: progress))
+                Text(value)
+                    .font(DSTypography.title3)
+                    .fontWeight(.semibold)
+                    .foregroundColor(DSDarkTheme.textPrimary)
+
+                if let progress = progress {
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(DSDarkTheme.surfaceActive)
+                                .frame(height: 4)
+
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(DSColor.progress(for: progress))
+                                .frame(width: geometry.size.width * progress, height: 4)
+                        }
+                    }
+                    .frame(height: 4)
+                }
             }
 
-            Text(detail)
-                .font(.caption)
-                .foregroundColor(.secondary)
+            Spacer()
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(8)
-    }
-
-    private func progressColor(for value: Double) -> Color {
-        if value > 0.9 { return .red }
-        if value > 0.7 { return .orange }
-        return .green
+        .padding(DSSpacing.md)
+        .background(DSDarkTheme.surface)
+        .cornerRadius(DSRadius.md)
     }
 }

@@ -11,7 +11,7 @@ struct MenuBarView: View {
     var body: some View {
         VStack(spacing: 0) {
             headerView
-            Divider()
+            Divider().background(DSDarkTheme.divider)
 
             if monitorService.servers.isEmpty {
                 emptyStateView
@@ -19,16 +19,19 @@ struct MenuBarView: View {
                 serverListView
             }
 
-            Divider()
+            Divider().background(DSDarkTheme.divider)
             footerView
         }
-        .frame(width: 320)
+        .frame(width: 360)
+        .background(DSDarkTheme.background)
+        .preferredColorScheme(.dark)
     }
 
     private var headerView: some View {
         HStack {
             Text("Server Monitor")
-                .font(.headline)
+                .font(DSTypography.headline)
+                .foregroundColor(DSDarkTheme.textPrimary)
             Spacer()
             Button(action: {
                 Task {
@@ -36,56 +39,60 @@ struct MenuBarView: View {
                 }
             }) {
                 Image(systemName: "arrow.clockwise")
+                    .foregroundColor(DSDarkTheme.textSecondary)
             }
             .buttonStyle(.borderless)
             .help("Refresh all servers")
         }
-        .padding()
+        .padding(DSSpacing.md)
+        .background(DSDarkTheme.surface)
     }
 
     private var emptyStateView: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: DSSpacing.md) {
             Image(systemName: "server.rack")
                 .font(.system(size: 40))
-                .foregroundColor(.secondary)
+                .foregroundColor(DSDarkTheme.textTertiary)
             Text("No servers configured")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+                .font(DSTypography.subheadline)
+                .foregroundColor(DSDarkTheme.textSecondary)
             Text("Open Settings to add servers")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(DSTypography.caption)
+                .foregroundColor(DSDarkTheme.textTertiary)
             Button("Open Settings") {
                 openSettings()
             }
+            .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
+        .padding(.vertical, DSSpacing.xxl)
+        .background(DSDarkTheme.background)
     }
 
     private var serverListView: some View {
         ScrollView {
-            LazyVStack(spacing: 8) {
+            LazyVStack(spacing: DSSpacing.sm) {
                 ForEach(monitorService.servers) { server in
-                    ServerRowView(
+                    MenuBarServerRow(
                         server: server,
                         stats: monitorService.stats[server.id]
                     )
                 }
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
+            .padding(.horizontal, DSSpacing.md)
+            .padding(.vertical, DSSpacing.sm)
         }
-        .frame(maxHeight: 300)
+        .frame(maxHeight: 320)
     }
 
     private var footerView: some View {
         HStack {
             Circle()
-                .fill(monitorService.isMonitoring ? Color.green : Color.gray)
+                .fill(monitorService.isMonitoring ? DSDarkTheme.online : DSDarkTheme.textTertiary)
                 .frame(width: 8, height: 8)
             Text(monitorService.isMonitoring ? "Monitoring" : "Paused")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .font(DSTypography.caption)
+                .foregroundColor(DSDarkTheme.textSecondary)
 
             Spacer()
 
@@ -93,13 +100,16 @@ struct MenuBarView: View {
                 openSettings()
             }
             .buttonStyle(.borderless)
+            .foregroundColor(DSDarkTheme.textSecondary)
 
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
             }
             .buttonStyle(.borderless)
+            .foregroundColor(DSDarkTheme.textSecondary)
         }
-        .padding()
+        .padding(DSSpacing.md)
+        .background(DSDarkTheme.surface)
     }
 
     private func openSettings() {
@@ -107,75 +117,105 @@ struct MenuBarView: View {
     }
 }
 
-struct ServerRowView: View {
+// MARK: - Menu Bar Server Row (Compact Termius Style)
+
+struct MenuBarServerRow: View {
     let server: Server
     let stats: ServerStats?
 
+    private var isOnline: Bool {
+        stats?.status == .online
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                statusIndicator
-                Text(server.name)
-                    .font(.headline)
-                Spacer()
-                if let stats = stats {
-                    Text(stats.status.rawValue)
-                        .font(.caption)
-                        .foregroundColor(statusColor)
+        VStack(alignment: .leading, spacing: DSSpacing.sm) {
+            // Header row
+            HStack(spacing: DSSpacing.md) {
+                // Status bar
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(isOnline ? DSDarkTheme.online : DSDarkTheme.offline)
+                    .frame(width: 3, height: 40)
+
+                // Server info
+                VStack(alignment: .leading, spacing: DSSpacing.xxxs) {
+                    Text(server.name)
+                        .font(DSTypography.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(DSDarkTheme.textPrimary)
+
+                    Text(server.host)
+                        .font(DSTypography.caption)
+                        .foregroundColor(DSDarkTheme.textSecondary)
                 }
+
+                Spacer()
+
+                // Status badge
+                Text(stats?.status.rawValue ?? "Unknown")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(isOnline ? DSDarkTheme.online : DSDarkTheme.offline)
+                    .padding(.horizontal, DSSpacing.sm)
+                    .padding(.vertical, DSSpacing.xxs)
+                    .background((isOnline ? DSDarkTheme.online : DSDarkTheme.offline).opacity(0.15))
+                    .cornerRadius(DSRadius.sm)
             }
 
+            // Stats row (when online)
             if let stats = stats, stats.status == .online {
-                statsGrid(stats)
+                HStack(spacing: 0) {
+                    if let cpu = stats.cpuLoad {
+                        MenuBarStatItem(
+                            icon: "cpu",
+                            value: String(format: "%.2f", cpu.load1)
+                        )
+                    }
+
+                    if let memory = stats.memory {
+                        Divider()
+                            .frame(height: 24)
+                            .background(DSDarkTheme.divider)
+                        MenuBarStatItem(
+                            icon: "memorychip",
+                            value: String(format: "%.0f%%", memory.usagePercent),
+                            color: DSColor.progress(for: memory.usagePercent / 100)
+                        )
+                    }
+
+                    if let disk = stats.disk {
+                        Divider()
+                            .frame(height: 24)
+                            .background(DSDarkTheme.divider)
+                        MenuBarStatItem(
+                            icon: "internaldrive",
+                            value: String(format: "%.0f%%", disk.usagePercent),
+                            color: DSColor.progress(for: disk.usagePercent / 100)
+                        )
+                    }
+                }
+                .padding(.leading, DSSpacing.lg)
             }
         }
-        .padding(10)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(8)
+        .padding(DSSpacing.md)
+        .background(DSDarkTheme.surface)
+        .cornerRadius(DSRadius.md)
     }
+}
 
-    private var statusIndicator: some View {
-        Circle()
-            .fill(statusColor)
-            .frame(width: 10, height: 10)
-    }
+struct MenuBarStatItem: View {
+    let icon: String
+    let value: String
+    var color: Color = .primary
 
-    private var statusColor: Color {
-        guard let stats = stats else { return .gray }
-        switch stats.status {
-        case .online: return .green
-        case .offline, .error: return .red
-        case .connecting: return .yellow
-        case .unknown: return .gray
-        }
-    }
-
-    @ViewBuilder
-    private func statsGrid(_ stats: ServerStats) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let cpu = stats.cpuLoad {
-                statRow(icon: "cpu", label: "Load", value: cpu.displayString)
-            }
-            if let memory = stats.memory {
-                statRow(icon: "memorychip", label: "Memory", value: memory.displayString)
-            }
-            if let disk = stats.disk {
-                statRow(icon: "internaldrive", label: "Disk", value: disk.displayString)
-            }
-        }
-        .font(.caption)
-    }
-
-    private func statRow(icon: String, label: String, value: String) -> some View {
-        HStack(spacing: 4) {
+    var body: some View {
+        HStack(spacing: DSSpacing.xxs) {
             Image(systemName: icon)
-                .frame(width: 16)
-                .foregroundColor(.secondary)
-            Text(label)
-                .foregroundColor(.secondary)
-                .frame(width: 50, alignment: .leading)
+                .font(.system(size: 10))
+                .foregroundColor(DSDarkTheme.textTertiary)
+
             Text(value)
-                .foregroundColor(.primary)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(color)
         }
+        .frame(maxWidth: .infinity)
     }
 }
