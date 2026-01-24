@@ -163,9 +163,12 @@ actor AgentService {
             try? FileManager.default.removeItem(at: localTempFile)
         }
 
-        // Create directories on remote server
-        let setupCommand = sudoCommand("mkdir -p /var/lib/server-monitor /var/log/server-monitor /tmp/server-monitor-install", password: sudoPassword)
+        // Create directories on remote server (sudo for system dirs, no sudo for temp dir)
+        let setupCommand = sudoCommand("mkdir -p /var/lib/server-monitor /var/log/server-monitor", password: sudoPassword)
         _ = try await executeSSH(server: server, command: setupCommand)
+
+        // Create temp directory without sudo so the SSH user can write to it
+        _ = try await executeSSH(server: server, command: "mkdir -p /tmp/server-monitor-install")
 
         // Use SCP to upload to a temporary location on the server
         let remoteTempPath = "/tmp/server-monitor-install/agent-binary"
