@@ -276,6 +276,10 @@ class MonitorService: ObservableObject {
         try await sshService.fetchServiceLogs(for: serviceName, on: server, lines: lines)
     }
 
+    func fetchContainerLogs(for containerName: String, on server: Server, lines: Int = 100) async throws -> String {
+        try await sshService.fetchContainerLogs(for: containerName, on: server, lines: lines)
+    }
+
     // MARK: - Server Management
 
     func addServer(_ server: Server) {

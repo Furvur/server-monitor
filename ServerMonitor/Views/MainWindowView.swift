@@ -1461,7 +1461,8 @@ struct ServiceStatusCard: View {
 
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(status?.containers ?? []) { container in
-                        ContainerRow(container: container)
+                        ContainerRow(container: container, server: server)
+                            .environmentObject(monitorService)
                         if container.id != status?.containers?.last?.id {
                             Divider()
                                 .background(DSDarkTheme.divider)
@@ -1629,7 +1630,10 @@ struct ServiceLogsView: View {
 // MARK: - Container Row
 
 struct ContainerRow: View {
+    @EnvironmentObject var monitorService: MonitorService
     let container: DockerContainer
+    let server: Server
+    @State private var showingLogs = false
 
     var body: some View {
         HStack(spacing: DSSpacing.sm) {
@@ -1665,10 +1669,25 @@ struct ContainerRow: View {
                     .font(.system(size: 10))
                     .foregroundColor(DSDarkTheme.textTertiary)
             }
+
+            // View Logs button
+            Button {
+                showingLogs = true
+            } label: {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 12))
+                    .foregroundColor(DSDarkTheme.textTertiary)
+            }
+            .buttonStyle(.plain)
+            .help("View Logs")
         }
         .padding(.horizontal, DSSpacing.sm)
         .padding(.vertical, DSSpacing.xs)
         .background(DSDarkTheme.surfaceHover.opacity(0.5))
+        .sheet(isPresented: $showingLogs) {
+            ContainerLogsView(container: container, server: server)
+                .environmentObject(monitorService)
+        }
     }
 
     private var stateColor: Color {
@@ -1680,6 +1699,119 @@ struct ContainerRow: View {
         case .dead, .removing: return DSDarkTheme.offline
         case .created: return .blue
         }
+    }
+}
+
+// MARK: - Container Logs View
+
+struct ContainerLogsView: View {
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var monitorService: MonitorService
+    let container: DockerContainer
+    let server: Server
+
+    @State private var logs: String = ""
+    @State private var isLoading = true
+    @State private var error: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: DSSpacing.xxs) {
+                    Text(container.name)
+                        .font(DSTypography.title3)
+                        .fontWeight(.semibold)
+                        .foregroundColor(DSDarkTheme.textPrimary)
+
+                    HStack(spacing: DSSpacing.xs) {
+                        Text(container.displayImage)
+                            .font(DSTypography.caption)
+                            .foregroundColor(DSDarkTheme.textSecondary)
+
+                        Text("•")
+                            .foregroundColor(DSDarkTheme.textTertiary)
+
+                        Text(server.name)
+                            .font(DSTypography.caption)
+                            .foregroundColor(DSDarkTheme.textSecondary)
+                    }
+                }
+
+                Spacer()
+
+                Button {
+                    Task { await loadLogs() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundColor(DSDarkTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
+
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(DSDarkTheme.textTertiary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(DSSpacing.lg)
+
+            Divider().background(DSDarkTheme.divider)
+
+            // Content
+            if isLoading {
+                Spacer()
+                ProgressView("Loading logs...")
+                    .foregroundColor(DSDarkTheme.textSecondary)
+                Spacer()
+            } else if let error = error {
+                Spacer()
+                VStack(spacing: DSSpacing.sm) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 32))
+                        .foregroundColor(DSDarkTheme.warning)
+                    Text(error)
+                        .font(DSTypography.subheadline)
+                        .foregroundColor(DSDarkTheme.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding()
+                Spacer()
+            } else {
+                ScrollView {
+                    Text(logs)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(DSDarkTheme.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(DSSpacing.md)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .frame(width: 700, height: 500)
+        .background(DSDarkTheme.background)
+        .preferredColorScheme(.dark)
+        .task {
+            await loadLogs()
+        }
+    }
+
+    private func loadLogs() async {
+        isLoading = true
+        error = nil
+
+        do {
+            logs = try await monitorService.fetchContainerLogs(for: container.name, on: server)
+            if logs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                logs = "No logs available for this container."
+            }
+        } catch {
+            self.error = "Failed to fetch logs: \(error.localizedDescription)"
+        }
+
+        isLoading = false
     }
 }
 

@@ -135,6 +135,13 @@ actor SSHService {
         return try await executeSSH(server: server, command: command)
     }
 
+    /// Fetches recent logs for a Docker container
+    func fetchContainerLogs(for containerName: String, on server: Server, lines: Int = 100) async throws -> String {
+        // Use docker logs command
+        let command = "docker logs --tail \(lines) \(containerName) 2>&1"
+        return try await executeSSH(server: server, command: command)
+    }
+
     // MARK: - Error Parsing
 
     private func parseSSHError(_ error: SSHError, server: Server) -> (ServerStatus, String) {
