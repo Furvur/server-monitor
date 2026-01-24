@@ -8,9 +8,52 @@ import Foundation
 actor SSHService {
     private let timeout: TimeInterval = 15
 
+    // Agent constants
+    private let agentMetricsPath = "/var/lib/server-monitor/metrics.json"
+    private let agentBinaryPath = "/usr/local/bin/server-monitor-agent"
+
     // MARK: - Main Fetch Method
 
     func fetchStats(for server: Server) async -> ServerStats {
+        // Use agent-based fetching if available and preferred
+        if server.useAgentFetching {
+            return await fetchStatsViaAgent(for: server)
+        }
+
+        // Fall back to command-based fetching
+        return await fetchStatsViaCommands(for: server)
+    }
+
+    // MARK: - Agent-Based Fetching
+
+    private func fetchStatsViaAgent(for server: Server) async -> ServerStats {
+        var stats = ServerStats(serverId: server.id, status: .connecting)
+
+        do {
+            // Simple cat command to read the pre-collected metrics
+            let output = try await executeSSH(server: server, command: "cat \(agentMetricsPath)")
+
+            // Parse the JSON output from the agent
+            let agentMetrics = try AgentMetrics.parse(from: output)
+            stats = agentMetrics.toServerStats(serverId: server.id)
+            stats.status = .online
+        } catch let error as SSHError {
+            // On SSH errors, report the error
+            let (status, message) = parseSSHError(error, server: server)
+            stats.status = status
+            stats.errorMessage = message
+        } catch {
+            // On agent parsing errors, fall back to command-based fetching
+            return await fetchStatsViaCommands(for: server)
+        }
+
+        stats.lastUpdated = Date()
+        return stats
+    }
+
+    // MARK: - Command-Based Fetching (Original Method)
+
+    private func fetchStatsViaCommands(for server: Server) async -> ServerStats {
         var stats = ServerStats(serverId: server.id, status: .connecting)
 
         do {
@@ -31,6 +74,56 @@ actor SSHService {
 
         stats.lastUpdated = Date()
         return stats
+    }
+
+    // MARK: - Agent Status Detection
+
+    func checkAgentStatus(for server: Server) async -> AgentStatus {
+        do {
+            // Check if agent binary exists and metrics file is recent (< 5 minutes old)
+            let command = """
+            if [ -f \(agentBinaryPath) ]; then
+                if [ -f \(agentMetricsPath) ]; then
+                    find \(agentMetricsPath) -mmin -5 -type f 2>/dev/null | grep -q . && echo "installed" || echo "stale"
+                else
+                    echo "no_metrics"
+                fi
+            else
+                echo "not_installed"
+            fi
+            """
+
+            let output = try await executeSSH(server: server, command: command)
+            let result = output.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            switch result {
+            case "installed":
+                return .installed
+            case "stale", "no_metrics":
+                return .error  // Agent is there but not producing fresh metrics
+            default:
+                return .notInstalled
+            }
+        } catch {
+            return .unknown
+        }
+    }
+
+    func getAgentVersion(for server: Server) async -> String? {
+        do {
+            let output = try await executeSSH(server: server, command: "\(agentBinaryPath) --version 2>/dev/null || echo ''")
+            let version = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            if version.isEmpty || version.contains("not found") {
+                return nil
+            }
+            // Extract version number from "server-monitor-agent version X.Y.Z"
+            if let range = version.range(of: "version ") {
+                return String(version[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            }
+            return version
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - Error Parsing

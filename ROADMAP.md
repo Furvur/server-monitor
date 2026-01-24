@@ -72,6 +72,37 @@
 - [x] HistoryService tests (record/retrieve, filtering, retention)
 - [x] MonitorService tests (settings persistence, server CRUD)
 
+### v0.2.1 - Server Agent for Efficient Monitoring
+
+#### Go Agent
+- [x] Go-based agent for Linux servers (amd64 and arm64)
+- [x] Direct `/proc` filesystem reading for efficient metric collection
+- [x] Collectors for CPU, memory, disk, swap, network, uptime, system info
+- [x] Docker container and systemd service detection
+- [x] Atomic JSON file writes to `/var/lib/server-monitor/metrics.json`
+- [x] Systemd service integration with auto-restart
+- [x] Cross-compilation via Makefile
+
+#### Agent Integration
+- [x] Agent installation via SSH from macOS app
+- [x] Agent uninstallation support
+- [x] Hybrid fetching: agent-based (fast) vs SSH commands (fallback)
+- [x] Agent status detection (installed, not installed, outdated, error)
+- [x] Version comparison and update detection
+- [x] Agent binaries bundled in app (built during Xcode build)
+
+#### Agent UI
+- [x] "Install Agent" button for servers without agent
+- [x] Installation progress sheet with step indicators
+- [x] "Update Available" badge when agent is outdated
+- [x] Agent menu with version info, update, and uninstall options
+- [x] Dynamic UI showing current vs available version
+
+#### iCloud Sync
+- [x] Server configuration sync via iCloud key-value store
+- [x] Automatic merge of local and cloud configurations
+- [x] Enable/disable sync in settings
+
 ---
 
 ## Planned

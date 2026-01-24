@@ -99,6 +99,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 24FD6AB32F21CA79003E8DED /* Build configuration list for PBXNativeTarget "ServerMonitor" */;
 			buildPhases = (
+				24FD6ACC2F21CA77003E8DED /* Build Go Agent */,
 				24FD6A8E2F21CA77003E8DED /* Sources */,
 				24FD6A8F2F21CA77003E8DED /* Frameworks */,
 				24FD6A902F21CA77003E8DED /* Resources */,
@@ -231,6 +232,32 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		24FD6ACC2F21CA77003E8DED /* Build Go Agent */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/agent/cmd/server-monitor-agent/main.go",
+				"$(SRCROOT)/agent/internal/collector/collector.go",
+				"$(SRCROOT)/agent/pkg/models/metrics.go",
+			);
+			name = "Build Go Agent";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/ServerMonitor/Resources/Agent/server-monitor-agent-linux-amd64",
+				"$(SRCROOT)/ServerMonitor/Resources/Agent/server-monitor-agent-linux-arm64",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Build Go agent binaries\ncd \"${SRCROOT}/agent\"\n\n# Check if Go is installed\nif ! command -v go &> /dev/null; then\n    echo \"warning: Go is not installed, skipping agent build\"\n    exit 0\nfi\n\necho \"Building Go agent for Linux...\"\nmake build\n\n# Copy binaries to Resources folder\nmkdir -p \"${SRCROOT}/ServerMonitor/Resources/Agent\"\ncp dist/server-monitor-agent-linux-amd64 \"${SRCROOT}/ServerMonitor/Resources/Agent/\"\ncp dist/server-monitor-agent-linux-arm64 \"${SRCROOT}/ServerMonitor/Resources/Agent/\"\n\necho \"Agent binaries copied to Resources/Agent\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		24FD6A8E2F21CA77003E8DED /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -307,7 +334,7 @@
 				DEVELOPMENT_TEAM = 6T569QU9JD;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -371,7 +398,7 @@
 				DEVELOPMENT_TEAM = 6T569QU9JD;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;

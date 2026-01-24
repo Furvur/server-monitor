@@ -59,6 +59,40 @@
 - **Disk Usage Chart** - Area chart showing disk consumption over time
 - **Time Range Picker** - View 1h, 6h, 24h, or 7d of history
 
+## Server Agent (Optional)
+
+### Overview
+An optional Go-based agent can be installed on Linux servers for more efficient metric collection. Instead of executing 10+ SSH commands per refresh, the agent reads directly from `/proc` and the app fetches metrics with a single `cat` command.
+
+### Agent Features
+- **Efficient Collection** - Reads directly from `/proc/loadavg`, `/proc/meminfo`, etc.
+- **Cross-Platform** - Supports Linux amd64 and arm64 architectures
+- **Automatic Updates** - App detects outdated agents and offers one-click updates
+- **Systemd Integration** - Runs as a system service with auto-restart
+- **Atomic Writes** - Metrics written atomically to prevent partial reads
+
+### Installation
+- One-click install from the macOS app
+- Automatic architecture detection
+- Progress indicator with detailed status
+- No manual server configuration required
+
+### Metrics Collected by Agent
+- CPU load (1/5/15 minute averages)
+- Memory usage (total, used, free)
+- Disk usage (root filesystem)
+- Swap usage
+- Network I/O (bytes in/out)
+- System uptime
+- OS and kernel information
+- Docker container status
+- Systemd service status
+
+### Agent Paths
+- Binary: `/usr/local/bin/server-monitor-agent`
+- Metrics: `/var/lib/server-monitor/metrics.json`
+- Service: `/etc/systemd/system/server-monitor-agent.service`
+
 ## Connection & Security
 
 ### SSH Configuration
@@ -82,6 +116,13 @@ All settings are automatically saved and restored:
 - **History Retention** - How long to keep historical data
 - **Menu Bar Visibility** - Show/hide menu bar icon
 - **Server Configurations** - All server connection details
+
+## iCloud Sync
+
+- **Server Configuration Sync** - Sync server configurations across devices via iCloud
+- **Automatic Merging** - Intelligently merges local and cloud configurations
+- **Enable/Disable** - Can be toggled in settings
+- **Requires iCloud** - User must be signed into iCloud
 
 ## Technical Details
 

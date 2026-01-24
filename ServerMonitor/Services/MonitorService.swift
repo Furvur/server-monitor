@@ -41,6 +41,7 @@ class MonitorService: ObservableObject {
     }
 
     private let sshService = SSHService()
+    private let agentService = AgentService()
     private var monitoringTask: Task<Void, Never>?
     private let configURL: URL
     let historyService: HistoryService
@@ -197,6 +198,75 @@ class MonitorService: ObservableObject {
         let stat = await sshService.fetchStats(for: server)
         stats[stat.id] = stat
         refreshingServerIDs.remove(server.id)
+    }
+
+    // MARK: - Agent Management
+
+    /// The version of the agent bundled with the app
+    var bundledAgentVersion: String {
+        AgentService.bundledVersion
+    }
+
+    func checkAgentStatus(for server: Server) async {
+        let status = await sshService.checkAgentStatus(for: server)
+        let version = await sshService.getAgentVersion(for: server)
+
+        if var updated = servers.first(where: { $0.id == server.id }) {
+            // Check if agent is installed but outdated
+            if status == .installed, let installedVersion = version {
+                if isVersionOutdated(installed: installedVersion, bundled: bundledAgentVersion) {
+                    updated.agentStatus = .outdated
+                } else {
+                    updated.agentStatus = status
+                }
+            } else {
+                updated.agentStatus = status
+            }
+            updated.agentVersion = version
+            updateServer(updated)
+        }
+    }
+
+    /// Compares version strings to determine if installed version is older than bundled
+    private func isVersionOutdated(installed: String, bundled: String) -> Bool {
+        let installedParts = installed.split(separator: ".").compactMap { Int($0) }
+        let bundledParts = bundled.split(separator: ".").compactMap { Int($0) }
+
+        // Pad arrays to same length
+        let maxLength = max(installedParts.count, bundledParts.count)
+        let installed = installedParts + Array(repeating: 0, count: maxLength - installedParts.count)
+        let bundled = bundledParts + Array(repeating: 0, count: maxLength - bundledParts.count)
+
+        // Compare each component
+        for i in 0..<maxLength {
+            if installed[i] < bundled[i] {
+                return true
+            } else if installed[i] > bundled[i] {
+                return false
+            }
+        }
+        return false // Same version
+    }
+
+    func installAgent(
+        on server: Server,
+        progressHandler: @escaping (AgentService.InstallationStep, String) -> Void
+    ) async throws {
+        try await agentService.installAgent(on: server, progressHandler: progressHandler)
+
+        // Update server's agent status after installation
+        await checkAgentStatus(for: server)
+    }
+
+    func uninstallAgent(from server: Server) async throws {
+        try await agentService.uninstallAgent(from: server)
+
+        // Update server's agent status after uninstallation
+        if var updated = servers.first(where: { $0.id == server.id }) {
+            updated.agentStatus = .notInstalled
+            updated.agentVersion = nil
+            updateServer(updated)
+        }
     }
 
     // MARK: - Server Management

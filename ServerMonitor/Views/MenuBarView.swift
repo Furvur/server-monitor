@@ -7,6 +7,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @EnvironmentObject var monitorService: MonitorService
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -111,10 +112,6 @@ struct MenuBarView: View {
         }
         .padding(DSSpacing.md)
         .background(DSDarkTheme.surface)
-    }
-
-    private func openSettings() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
 }
 

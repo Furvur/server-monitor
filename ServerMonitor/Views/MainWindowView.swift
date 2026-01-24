@@ -7,6 +7,7 @@ import SwiftUI
 
 struct MainWindowView: View {
     @EnvironmentObject var monitorService: MonitorService
+    @Environment(\.openSettings) private var openSettings
     @State private var selectedServerIDs: Set<UUID> = []
     @State private var lastSelectedID: UUID?  // For shift-click range selection
     @State private var showingAddServer = false
@@ -58,7 +59,7 @@ struct MainWindowView: View {
 
             ToolbarItem(placement: .primaryAction) {
                 Button(action: {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    openSettings()
                 }) {
                     Image(systemName: "gear")
                 }
@@ -234,7 +235,7 @@ struct MainWindowView: View {
                 }
 
                 Button(action: {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    openSettings()
                 }) {
                     Image(systemName: "gearshape")
                         .font(.system(size: 14))
@@ -807,42 +808,16 @@ struct ServerSidebarRow: View {
 
 // MARK: - Server Detail View
 
-enum DetailTab: String, CaseIterable {
-    case overview = "Overview"
-    case charts = "Charts"
-}
-
 struct ServerDetailView: View {
+    @EnvironmentObject var monitorService: MonitorService
     let server: Server
     let stats: ServerStats
     let historyService: HistoryService
     var isRefreshing: Bool = false
-    @State private var selectedTab: DetailTab = .overview
+    @State private var snapshots: [MetricSnapshot] = []
+    @State private var showingAgentInstall = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Tab picker
-            Picker("", selection: $selectedTab) {
-                ForEach(DetailTab.allCases, id: \.self) { tab in
-                    Text(tab.rawValue).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding()
-            .frame(width: 200)
-
-            // Tab content
-            switch selectedTab {
-            case .overview:
-                overviewContent
-            case .charts:
-                ServerChartsView(server: server, historyService: historyService)
-            }
-        }
-        .navigationTitle(server.name)
-    }
-
-    private var overviewContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DSSpacing.lg) {
                 headerSection
@@ -859,6 +834,22 @@ struct ServerDetailView: View {
             .padding(DSSpacing.lg)
         }
         .background(DSDarkTheme.background)
+        .navigationTitle(server.name)
+        .onAppear {
+            loadHistory()
+        }
+        .onChange(of: stats.lastUpdated) { _, _ in
+            loadHistory()
+        }
+        .sheet(isPresented: $showingAgentInstall) {
+            AgentInstallView(server: server)
+                .environmentObject(monitorService)
+        }
+    }
+
+    private func loadHistory() {
+        // Load last hour of data for sparklines
+        snapshots = historyService.getHistory(for: server.id, hours: 1)
     }
 
     private var headerSection: some View {
@@ -937,6 +928,11 @@ struct ServerDetailView: View {
                     if !sysInfo.architecture.isEmpty {
                         InfoBadge(icon: "cpu", text: sysInfo.architecture)
                     }
+
+                    Spacer()
+
+                    // Agent status / install button
+                    agentStatusView
                 }
             }
 
@@ -971,6 +967,152 @@ struct ServerDetailView: View {
         .padding(DSSpacing.md)
         .background(DSDarkTheme.surface)
         .cornerRadius(DSRadius.lg)
+    }
+
+    // MARK: - Agent Status View
+
+    @ViewBuilder
+    private var agentStatusView: some View {
+        switch server.agentStatus {
+        case .installed:
+            // Agent is installed - show status badge with menu
+            Menu {
+                Button {
+                    Task {
+                        await monitorService.checkAgentStatus(for: server)
+                    }
+                } label: {
+                    Label("Check Status", systemImage: "arrow.clockwise")
+                }
+
+                Divider()
+
+                Button(role: .destructive) {
+                    Task {
+                        try? await monitorService.uninstallAgent(from: server)
+                    }
+                } label: {
+                    Label("Uninstall Agent", systemImage: "trash")
+                }
+            } label: {
+                HStack(spacing: DSSpacing.xxs) {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 10))
+                    Text("Agent")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(DSDarkTheme.online)
+                .padding(.horizontal, DSSpacing.sm)
+                .padding(.vertical, DSSpacing.xxs)
+                .background(DSDarkTheme.online.opacity(0.15))
+                .cornerRadius(DSRadius.sm)
+            }
+
+        case .outdated:
+            // Agent needs update - show update button with version info
+            Menu {
+                Text("Installed: v\(server.agentVersion ?? "?")")
+                Text("Available: v\(monitorService.bundledAgentVersion)")
+
+                Divider()
+
+                Button {
+                    showingAgentInstall = true
+                } label: {
+                    Label("Update Agent", systemImage: "arrow.down.circle")
+                }
+
+                Button {
+                    Task {
+                        await monitorService.checkAgentStatus(for: server)
+                    }
+                } label: {
+                    Label("Check Status", systemImage: "arrow.clockwise")
+                }
+
+                Divider()
+
+                Button(role: .destructive) {
+                    Task {
+                        try? await monitorService.uninstallAgent(from: server)
+                    }
+                } label: {
+                    Label("Uninstall Agent", systemImage: "trash")
+                }
+            } label: {
+                HStack(spacing: DSSpacing.xxs) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 10))
+                    Text("Update Available")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(DSDarkTheme.info)
+                .padding(.horizontal, DSSpacing.sm)
+                .padding(.vertical, DSSpacing.xxs)
+                .background(DSDarkTheme.info.opacity(0.15))
+                .cornerRadius(DSRadius.sm)
+            }
+
+        case .error:
+            // Agent has issues - show warning
+            Menu {
+                Button {
+                    showingAgentInstall = true
+                } label: {
+                    Label("Reinstall Agent", systemImage: "arrow.clockwise.circle")
+                }
+
+                Button {
+                    Task {
+                        await monitorService.checkAgentStatus(for: server)
+                    }
+                } label: {
+                    Label("Check Status", systemImage: "arrow.clockwise")
+                }
+
+                Divider()
+
+                Button(role: .destructive) {
+                    Task {
+                        try? await monitorService.uninstallAgent(from: server)
+                    }
+                } label: {
+                    Label("Uninstall Agent", systemImage: "trash")
+                }
+            } label: {
+                HStack(spacing: DSSpacing.xxs) {
+                    Image(systemName: "exclamationmark.bolt.fill")
+                        .font(.system(size: 10))
+                    Text("Agent Issue")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(DSDarkTheme.warning)
+                .padding(.horizontal, DSSpacing.sm)
+                .padding(.vertical, DSSpacing.xxs)
+                .background(DSDarkTheme.warning.opacity(0.15))
+                .cornerRadius(DSRadius.sm)
+            }
+
+        case .notInstalled, .unknown:
+            // Agent not installed - show install button
+            Button {
+                showingAgentInstall = true
+            } label: {
+                HStack(spacing: DSSpacing.xxs) {
+                    Image(systemName: "bolt")
+                        .font(.system(size: 10))
+                    Text("Install Agent")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(DSDarkTheme.textSecondary)
+                .padding(.horizontal, DSSpacing.sm)
+                .padding(.vertical, DSSpacing.xxs)
+                .background(DSDarkTheme.surfaceHover)
+                .cornerRadius(DSRadius.sm)
+            }
+            .buttonStyle(.plain)
+            .help("Install agent for faster, more efficient monitoring")
+        }
     }
 
     // Helper view for system info badges
@@ -1046,7 +1188,9 @@ struct ServerDetailView: View {
                         title: "CPU Load",
                         icon: "cpu",
                         value: String(format: "%.2f", cpu.load1),
-                        detail: String(format: "%.2f / %.2f", cpu.load5, cpu.load15)
+                        detail: String(format: "%.2f / %.2f", cpu.load5, cpu.load15),
+                        sparklineData: snapshots.cpuLoad1(),
+                        sparklineColor: .blue
                     )
                 }
 
@@ -1057,7 +1201,8 @@ struct ServerDetailView: View {
                         icon: "memorychip",
                         value: String(format: "%.0f%%", memory.usagePercent),
                         detail: memory.displayString,
-                        progress: memory.usagePercent / 100
+                        progress: memory.usagePercent / 100,
+                        sparklineData: snapshots.memoryPercentages()
                     )
                 }
 
@@ -1068,7 +1213,8 @@ struct ServerDetailView: View {
                         icon: "internaldrive",
                         value: String(format: "%.0f%%", disk.usagePercent),
                         detail: disk.displayString,
-                        progress: disk.usagePercent / 100
+                        progress: disk.usagePercent / 100,
+                        sparklineData: snapshots.diskPercentages()
                     )
                 }
 
@@ -1499,6 +1645,8 @@ struct CompactStatCard: View {
     let value: String
     let detail: String
     var progress: Double? = nil
+    var sparklineData: [Double]? = nil
+    var sparklineColor: Color? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
@@ -1527,8 +1675,18 @@ struct CompactStatCard: View {
                 .foregroundColor(DSDarkTheme.textSecondary)
                 .lineLimit(1)
 
-            // Progress bar (if applicable)
-            if let progress = progress {
+            // Sparkline (if data provided)
+            if let data = sparklineData, !data.isEmpty {
+                Sparkline(
+                    data: data,
+                    color: sparklineColor ?? (progress.map { DSColor.progress(for: $0) } ?? DSDarkTheme.online),
+                    showGradient: true,
+                    height: 32
+                )
+                .padding(.top, DSSpacing.xxs)
+            }
+            // Progress bar (fallback if no sparkline)
+            else if let progress = progress {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 2)
