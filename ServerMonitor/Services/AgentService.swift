@@ -148,21 +148,39 @@ actor AgentService {
     }
 
     private func uploadBinary(_ data: Data, to server: Server) async throws {
-        // Base64 encode the binary for safe transfer
-        let base64 = data.base64EncodedString()
+        // Write binary to a local temporary file
+        let tempDir = FileManager.default.temporaryDirectory
+        let localTempFile = tempDir.appendingPathComponent("server-monitor-agent-\(UUID().uuidString)")
 
-        // Upload in chunks if needed (SSH has command length limits)
-        // For simplicity, we'll use a temporary file approach
-        let command = """
-        sudo mkdir -p /var/lib/server-monitor /var/log/server-monitor
-        echo '\(base64)' | base64 -d | sudo tee \(agentBinaryPath) > /dev/null
+        do {
+            try data.write(to: localTempFile)
+        } catch {
+            throw AgentServiceError.uploadFailed("Failed to write temporary file: \(error.localizedDescription)")
+        }
+
+        defer {
+            try? FileManager.default.removeItem(at: localTempFile)
+        }
+
+        // Create directories on remote server
+        let setupCommand = "sudo mkdir -p /var/lib/server-monitor /var/log/server-monitor /tmp/server-monitor-install"
+        _ = try await executeSSH(server: server, command: setupCommand)
+
+        // Use SCP to upload to a temporary location on the server
+        let remoteTempPath = "/tmp/server-monitor-install/agent-binary"
+        try await executeSCP(localPath: localTempFile.path, remotePath: remoteTempPath, server: server)
+
+        // Move the binary to final location and set permissions
+        let installCommand = """
+        sudo mv \(remoteTempPath) \(agentBinaryPath)
         sudo chmod +x \(agentBinaryPath)
+        sudo rm -rf /tmp/server-monitor-install
         test -x \(agentBinaryPath) && echo "upload_ok" || echo "upload_failed"
         """
 
-        let output = try await executeSSH(server: server, command: command)
+        let output = try await executeSSH(server: server, command: installCommand)
         if !output.contains("upload_ok") {
-            throw AgentServiceError.uploadFailed("Binary upload verification failed")
+            throw AgentServiceError.uploadFailed("Binary installation verification failed")
         }
     }
 
@@ -219,7 +237,51 @@ actor AgentService {
         }
     }
 
-    // MARK: - SSH Execution
+    // MARK: - SSH/SCP Execution
+
+    private func executeSCP(localPath: String, remotePath: String, server: Server) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/scp")
+
+            var arguments = [
+                "-o", "BatchMode=yes",
+                "-o", "ConnectTimeout=30",
+                "-o", "StrictHostKeyChecking=accept-new"
+            ]
+
+            if let keyPath = server.sshKeyPath, !keyPath.isEmpty {
+                arguments += ["-i", keyPath]
+            }
+
+            if server.port != 22 {
+                arguments += ["-P", String(server.port)]
+            }
+
+            arguments += [localPath, "\(server.username)@\(server.host):\(remotePath)"]
+
+            process.arguments = arguments
+
+            let errorPipe = Pipe()
+            process.standardError = errorPipe
+            process.standardOutput = FileHandle.nullDevice
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
+                if process.terminationStatus == 0 {
+                    continuation.resume()
+                } else {
+                    let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+                    let errorOutput = String(data: errorData, encoding: .utf8) ?? "Unknown SCP error"
+                    continuation.resume(throwing: AgentServiceError.uploadFailed("SCP failed: \(errorOutput)"))
+                }
+            } catch {
+                continuation.resume(throwing: AgentServiceError.uploadFailed("SCP error: \(error.localizedDescription)"))
+            }
+        }
+    }
 
     private func executeSSH(server: Server, command: String) async throws -> String {
         return try await withCheckedThrowingContinuation { continuation in
