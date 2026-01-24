@@ -16,6 +16,8 @@ struct AgentInstallView: View {
     @State private var isInstalling = false
     @State private var installationComplete = false
     @State private var error: String?
+    @State private var needsSudoPassword = false
+    @State private var sudoPassword = ""
 
     var body: some View {
         VStack(spacing: DSSpacing.lg) {
@@ -31,8 +33,13 @@ struct AgentInstallView: View {
             // Log output
             logSection
 
+            // Sudo password prompt
+            if needsSudoPassword {
+                sudoPasswordSection
+            }
+
             // Error message
-            if let error = error {
+            if let error = error, !needsSudoPassword {
                 errorSection(error)
             }
 
@@ -46,7 +53,7 @@ struct AgentInstallView: View {
         .background(DSDarkTheme.background)
         .preferredColorScheme(.dark)
         .onAppear {
-            startInstallation()
+            startInstallation(withPassword: nil)
         }
     }
 
@@ -155,6 +162,32 @@ struct AgentInstallView: View {
         .cornerRadius(DSRadius.sm)
     }
 
+    private var sudoPasswordSection: some View {
+        VStack(alignment: .leading, spacing: DSSpacing.sm) {
+            HStack(spacing: DSSpacing.xs) {
+                Image(systemName: "lock.fill")
+                    .foregroundColor(DSDarkTheme.warning)
+                Text("Sudo password required")
+                    .font(DSTypography.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(DSDarkTheme.textPrimary)
+            }
+
+            Text("The server requires a password for sudo commands.")
+                .font(DSTypography.caption)
+                .foregroundColor(DSDarkTheme.textSecondary)
+
+            SecureField("Enter sudo password", text: $sudoPassword)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    submitPassword()
+                }
+        }
+        .padding(DSSpacing.md)
+        .background(DSDarkTheme.warning.opacity(0.1))
+        .cornerRadius(DSRadius.md)
+    }
+
     private var actionButtons: some View {
         HStack(spacing: DSSpacing.md) {
             if installationComplete {
@@ -163,11 +196,22 @@ struct AgentInstallView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(DSDarkTheme.online)
+            } else if needsSudoPassword {
+                Button("Continue") {
+                    submitPassword()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(sudoPassword.isEmpty)
+
+                Button("Cancel") {
+                    dismiss()
+                }
+                .buttonStyle(.bordered)
             } else if error != nil {
                 Button("Retry") {
                     error = nil
                     progressLog = []
-                    startInstallation()
+                    startInstallation(withPassword: nil)
                 }
                 .buttonStyle(.bordered)
 
@@ -183,6 +227,13 @@ struct AgentInstallView: View {
                 .disabled(isInstalling)
             }
         }
+    }
+
+    private func submitPassword() {
+        needsSudoPassword = false
+        error = nil
+        progressLog.append("Retrying with sudo password...")
+        startInstallation(withPassword: sudoPassword)
     }
 
     // MARK: - Helpers
@@ -206,13 +257,15 @@ struct AgentInstallView: View {
 
     // MARK: - Installation
 
-    private func startInstallation() {
+    private func startInstallation(withPassword password: String? = nil) {
         isInstalling = true
-        progressLog.append("Starting installation...")
+        if password == nil {
+            progressLog.append("Starting installation...")
+        }
 
         Task {
             do {
-                try await monitorService.installAgent(on: server) { step, message in
+                try await monitorService.installAgent(on: server, sudoPassword: password) { step, message in
                     Task { @MainActor in
                         self.currentStep = step
                         self.progressLog.append(message)
@@ -224,6 +277,21 @@ struct AgentInstallView: View {
                     currentStep = .complete
                     progressLog.append("Installation complete!")
                     isInstalling = false
+                }
+            } catch let error as AgentService.AgentServiceError {
+                await MainActor.run {
+                    // Check if this is a sudo password error
+                    if error.localizedDescription.contains("password") ||
+                       error.localizedDescription.contains("sudo") {
+                        self.needsSudoPassword = true
+                        self.currentStep = .configuring
+                        self.progressLog.append("Sudo password required...")
+                    } else {
+                        self.error = error.localizedDescription
+                        self.currentStep = .failed
+                        self.progressLog.append("Error: \(error.localizedDescription)")
+                    }
+                    self.isInstalling = false
                 }
             } catch {
                 await MainActor.run {

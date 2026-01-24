@@ -250,9 +250,10 @@ class MonitorService: ObservableObject {
 
     func installAgent(
         on server: Server,
+        sudoPassword: String? = nil,
         progressHandler: @escaping (AgentService.InstallationStep, String) -> Void
     ) async throws {
-        try await agentService.installAgent(on: server, progressHandler: progressHandler)
+        try await agentService.installAgent(on: server, sudoPassword: sudoPassword, progressHandler: progressHandler)
 
         // Update server's agent status after installation
         await checkAgentStatus(for: server)

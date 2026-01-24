@@ -59,6 +59,7 @@ actor AgentService {
     /// Installs the agent on a remote server
     func installAgent(
         on server: Server,
+        sudoPassword: String? = nil,
         progressHandler: @escaping (InstallationStep, String) -> Void
     ) async throws {
         // Step 1: Detect architecture
@@ -72,17 +73,17 @@ actor AgentService {
 
         // Step 3: Upload binary
         progressHandler(.uploading, "Uploading agent binary to server...")
-        try await uploadBinary(binaryData, to: server)
+        try await uploadBinary(binaryData, to: server, sudoPassword: sudoPassword)
         progressHandler(.uploading, "Binary uploaded successfully")
 
         // Step 4: Configure systemd
         progressHandler(.configuring, "Creating systemd service...")
-        try await configureSystemdService(on: server)
+        try await configureSystemdService(on: server, sudoPassword: sudoPassword)
         progressHandler(.configuring, "Service configured")
 
         // Step 5: Start service
         progressHandler(.starting, "Starting agent service...")
-        try await startService(on: server)
+        try await startService(on: server, sudoPassword: sudoPassword)
         progressHandler(.starting, "Service started")
 
         // Step 6: Verify installation
@@ -147,7 +148,7 @@ actor AgentService {
         throw AgentServiceError.binaryNotFound(arch)
     }
 
-    private func uploadBinary(_ data: Data, to server: Server) async throws {
+    private func uploadBinary(_ data: Data, to server: Server, sudoPassword: String?) async throws {
         // Write binary to a local temporary file
         let tempDir = FileManager.default.temporaryDirectory
         let localTempFile = tempDir.appendingPathComponent("server-monitor-agent-\(UUID().uuidString)")
@@ -163,7 +164,7 @@ actor AgentService {
         }
 
         // Create directories on remote server
-        let setupCommand = "sudo mkdir -p /var/lib/server-monitor /var/log/server-monitor /tmp/server-monitor-install"
+        let setupCommand = sudoCommand("mkdir -p /var/lib/server-monitor /var/log/server-monitor /tmp/server-monitor-install", password: sudoPassword)
         _ = try await executeSSH(server: server, command: setupCommand)
 
         // Use SCP to upload to a temporary location on the server
@@ -171,12 +172,12 @@ actor AgentService {
         try await executeSCP(localPath: localTempFile.path, remotePath: remoteTempPath, server: server)
 
         // Move the binary to final location and set permissions
-        let installCommand = """
-        sudo mv \(remoteTempPath) \(agentBinaryPath)
-        sudo chmod +x \(agentBinaryPath)
-        sudo rm -rf /tmp/server-monitor-install
+        let installCommand = sudoCommand("""
+        mv \(remoteTempPath) \(agentBinaryPath) && \
+        chmod +x \(agentBinaryPath) && \
+        rm -rf /tmp/server-monitor-install && \
         test -x \(agentBinaryPath) && echo "upload_ok" || echo "upload_failed"
-        """
+        """, password: sudoPassword)
 
         let output = try await executeSSH(server: server, command: installCommand)
         if !output.contains("upload_ok") {
@@ -184,7 +185,19 @@ actor AgentService {
         }
     }
 
-    private func configureSystemdService(on server: Server) async throws {
+    /// Wraps a command with sudo, optionally piping password via stdin
+    private func sudoCommand(_ command: String, password: String?) -> String {
+        if let password = password {
+            // Use sudo -S to read password from stdin
+            // Echo password and pipe to sudo
+            let escapedPassword = password.replacingOccurrences(of: "'", with: "'\\''")
+            return "echo '\(escapedPassword)' | sudo -S bash -c '\(command.replacingOccurrences(of: "'", with: "'\\''"))'"
+        } else {
+            return "sudo \(command)"
+        }
+    }
+
+    private func configureSystemdService(on server: Server, sudoPassword: String?) async throws {
         let serviceUnit = """
         [Unit]
         Description=Server Monitor Agent
@@ -200,29 +213,32 @@ actor AgentService {
         WantedBy=multi-user.target
         """
 
-        let escapedUnit = serviceUnit.replacingOccurrences(of: "'", with: "'\\''")
+        // Write the service file and configure systemd
+        let writeServiceCommand = "cat > /etc/systemd/system/\(agentServiceName).service << 'SERVICEEOF'\n\(serviceUnit)\nSERVICEEOF"
+        let configCommand = sudoCommand(writeServiceCommand, password: sudoPassword)
 
-        let command = """
-        echo '\(escapedUnit)' | sudo tee /etc/systemd/system/\(agentServiceName).service > /dev/null
-        sudo systemctl daemon-reload
-        sudo systemctl enable \(agentServiceName)
-        echo "config_ok"
-        """
+        _ = try await executeSSH(server: server, command: configCommand)
 
-        let output = try await executeSSH(server: server, command: command)
+        // Reload and enable the service
+        let enableCommand = sudoCommand("systemctl daemon-reload && systemctl enable \(agentServiceName)", password: sudoPassword)
+        let output = try await executeSSH(server: server, command: enableCommand + " && echo 'config_ok'")
+
         if !output.contains("config_ok") {
             throw AgentServiceError.serviceConfigFailed("Failed to configure systemd service")
         }
     }
 
-    private func startService(on server: Server) async throws {
-        let command = """
-        sudo systemctl start \(agentServiceName)
-        sleep 2
-        sudo systemctl is-active \(agentServiceName)
-        """
+    private func startService(on server: Server, sudoPassword: String?) async throws {
+        let startCommand = sudoCommand("systemctl start \(agentServiceName)", password: sudoPassword)
+        _ = try await executeSSH(server: server, command: startCommand)
 
-        let output = try await executeSSH(server: server, command: command)
+        // Wait a moment for the service to start
+        try await Task.sleep(nanoseconds: 2_000_000_000)
+
+        // Check if service is active
+        let checkCommand = sudoCommand("systemctl is-active \(agentServiceName)", password: sudoPassword)
+        let output = try await executeSSH(server: server, command: checkCommand)
+
         if !output.trimmingCharacters(in: .whitespacesAndNewlines).contains("active") {
             throw AgentServiceError.serviceStartFailed("Service did not start properly")
         }
