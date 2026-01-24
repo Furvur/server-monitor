@@ -816,22 +816,50 @@ struct ServerDetailView: View {
     var isRefreshing: Bool = false
     @State private var snapshots: [MetricSnapshot] = []
     @State private var showingAgentInstall = false
+    @State private var isCheckingAgentStatus = false
+    @State private var agentStatusToast: String?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: DSSpacing.lg) {
-                headerSection
-                if stats.status == .online {
-                    statsSection
-                    if !server.enabledServices.isEmpty {
-                        servicesSection
+        ZStack(alignment: .top) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: DSSpacing.lg) {
+                    headerSection
+                    if stats.status == .online {
+                        statsSection
+                        if !server.enabledServices.isEmpty {
+                            servicesSection
+                        }
+                    } else {
+                        statusSection
                     }
-                } else {
-                    statusSection
+                    Spacer()
                 }
-                Spacer()
+                .padding(DSSpacing.lg)
             }
-            .padding(DSSpacing.lg)
+
+            // Toast overlay
+            if let toast = agentStatusToast {
+                HStack(spacing: DSSpacing.sm) {
+                    if isCheckingAgentStatus {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    } else {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(DSDarkTheme.online)
+                    }
+                    Text(toast)
+                        .font(DSTypography.subheadline)
+                        .foregroundColor(DSDarkTheme.textPrimary)
+                }
+                .padding(.horizontal, DSSpacing.md)
+                .padding(.vertical, DSSpacing.sm)
+                .background(DSDarkTheme.surface)
+                .cornerRadius(DSRadius.md)
+                .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                .padding(.top, DSSpacing.md)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .background(DSDarkTheme.background)
         .navigationTitle(server.name)
@@ -850,6 +878,42 @@ struct ServerDetailView: View {
     private func loadHistory() {
         // Load last hour of data for sparklines
         snapshots = historyService.getHistory(for: server.id, hours: 1)
+    }
+
+    private func checkAgentStatusWithFeedback() {
+        Task {
+            withAnimation {
+                isCheckingAgentStatus = true
+                agentStatusToast = "Checking agent status..."
+            }
+
+            await monitorService.checkAgentStatus(for: server)
+
+            // Get the updated server from monitorService
+            if let updatedServer = monitorService.servers.first(where: { $0.id == server.id }) {
+                withAnimation {
+                    isCheckingAgentStatus = false
+                    switch updatedServer.agentStatus {
+                    case .installed:
+                        agentStatusToast = "Agent v\(updatedServer.agentVersion ?? "?") installed"
+                    case .outdated:
+                        agentStatusToast = "Agent v\(updatedServer.agentVersion ?? "?") (update available)"
+                    case .notInstalled:
+                        agentStatusToast = "Agent not installed"
+                    case .error:
+                        agentStatusToast = "Agent error (not responding)"
+                    case .unknown:
+                        agentStatusToast = "Status unknown"
+                    }
+                }
+            }
+
+            // Auto-dismiss after 3 seconds
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            withAnimation {
+                agentStatusToast = nil
+            }
+        }
     }
 
     private var headerSection: some View {
@@ -978,9 +1042,7 @@ struct ServerDetailView: View {
             // Agent is installed - show status badge with menu
             Menu {
                 Button {
-                    Task {
-                        await monitorService.checkAgentStatus(for: server)
-                    }
+                    checkAgentStatusWithFeedback()
                 } label: {
                     Label("Check Status", systemImage: "arrow.clockwise")
                 }
@@ -1023,9 +1085,7 @@ struct ServerDetailView: View {
                 }
 
                 Button {
-                    Task {
-                        await monitorService.checkAgentStatus(for: server)
-                    }
+                    checkAgentStatusWithFeedback()
                 } label: {
                     Label("Check Status", systemImage: "arrow.clockwise")
                 }
@@ -1063,9 +1123,7 @@ struct ServerDetailView: View {
                 }
 
                 Button {
-                    Task {
-                        await monitorService.checkAgentStatus(for: server)
-                    }
+                    checkAgentStatusWithFeedback()
                 } label: {
                     Label("Check Status", systemImage: "arrow.clockwise")
                 }
