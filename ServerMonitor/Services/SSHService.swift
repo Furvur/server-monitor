@@ -126,6 +126,15 @@ actor SSHService {
         }
     }
 
+    // MARK: - Service Logs
+
+    /// Fetches recent logs for a systemd service
+    func fetchServiceLogs(for serviceName: String, on server: Server, lines: Int = 100) async throws -> String {
+        // Use journalctl for systemd services
+        let command = "journalctl -u \(serviceName) -n \(lines) --no-pager 2>/dev/null || echo 'No logs available'"
+        return try await executeSSH(server: server, command: command)
+    }
+
     // MARK: - Error Parsing
 
     private func parseSSHError(_ error: SSHError, server: Server) -> (ServerStatus, String) {

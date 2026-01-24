@@ -270,6 +270,12 @@ class MonitorService: ObservableObject {
         }
     }
 
+    // MARK: - Service Logs
+
+    func fetchServiceLogs(for serviceName: String, on server: Server, lines: Int = 100) async throws -> String {
+        try await sshService.fetchServiceLogs(for: serviceName, on: server, lines: lines)
+    }
+
     // MARK: - Server Management
 
     func addServer(_ server: Server) {

@@ -1319,8 +1319,10 @@ struct ServerDetailView: View {
                 if let service = BuiltInServices.service(withId: serviceId) {
                     ServiceStatusCard(
                         service: service,
-                        status: stats.services[serviceId]
+                        status: stats.services[serviceId],
+                        server: server
                     )
+                    .environmentObject(monitorService)
                 }
             }
         }
@@ -1339,10 +1341,13 @@ struct ServerDetailView: View {
 // MARK: - Service Status Card
 
 struct ServiceStatusCard: View {
+    @EnvironmentObject var monitorService: MonitorService
     let service: ServiceDefinition
     let status: ServiceStatus?
+    let server: Server
     @State private var isExpanded = false
     @State private var showingActions = false
+    @State private var showingLogs = false
 
     private var isRunning: Bool {
         status?.isRunning ?? false
@@ -1408,7 +1413,7 @@ struct ServiceStatusCard: View {
                     }
 
                     Button {
-                        // View logs action placeholder
+                        showingLogs = true
                     } label: {
                         Label("View Logs", systemImage: "doc.text")
                     }
@@ -1468,6 +1473,156 @@ struct ServiceStatusCard: View {
         }
         .background(DSDarkTheme.surface)
         .cornerRadius(DSRadius.md)
+        .sheet(isPresented: $showingLogs) {
+            ServiceLogsView(service: service, server: server)
+                .environmentObject(monitorService)
+        }
+    }
+}
+
+// MARK: - Service Logs View
+
+struct ServiceLogsView: View {
+    @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var monitorService: MonitorService
+    let service: ServiceDefinition
+    let server: Server
+
+    @State private var logs: String = ""
+    @State private var isLoading = true
+    @State private var error: String?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: DSSpacing.xxs) {
+                    Text("\(service.name) Logs")
+                        .font(DSTypography.title3)
+                        .fontWeight(.semibold)
+                        .foregroundColor(DSDarkTheme.textPrimary)
+
+                    Text(server.name)
+                        .font(DSTypography.caption)
+                        .foregroundColor(DSDarkTheme.textSecondary)
+                }
+
+                Spacer()
+
+                Button {
+                    Task { await loadLogs() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .foregroundColor(DSDarkTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading)
+
+                Button(action: { dismiss() }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(DSDarkTheme.textTertiary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(DSSpacing.lg)
+
+            Divider().background(DSDarkTheme.divider)
+
+            // Content
+            if isLoading {
+                Spacer()
+                ProgressView("Loading logs...")
+                    .foregroundColor(DSDarkTheme.textSecondary)
+                Spacer()
+            } else if let error = error {
+                Spacer()
+                VStack(spacing: DSSpacing.sm) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 32))
+                        .foregroundColor(DSDarkTheme.warning)
+                    Text(error)
+                        .font(DSTypography.subheadline)
+                        .foregroundColor(DSDarkTheme.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding()
+                Spacer()
+            } else {
+                ScrollView {
+                    Text(logs)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(DSDarkTheme.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(DSSpacing.md)
+                        .textSelection(.enabled)
+                }
+            }
+        }
+        .frame(width: 700, height: 500)
+        .background(DSDarkTheme.background)
+        .preferredColorScheme(.dark)
+        .task {
+            await loadLogs()
+        }
+    }
+
+    private func loadLogs() async {
+        isLoading = true
+        error = nil
+
+        do {
+            // Map service name to systemd unit name
+            let unitName = systemdUnitName(for: service)
+            logs = try await monitorService.fetchServiceLogs(for: unitName, on: server)
+            if logs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                logs = "No logs available for this service."
+            }
+        } catch {
+            self.error = "Failed to fetch logs: \(error.localizedDescription)"
+        }
+
+        isLoading = false
+    }
+
+    /// Maps a service definition to its systemd unit name
+    private func systemdUnitName(for service: ServiceDefinition) -> String {
+        // Common service name mappings
+        switch service.name.lowercased() {
+        case "docker":
+            return "docker"
+        case "podman":
+            return "podman"
+        case "nginx":
+            return "nginx"
+        case "apache", "apache2", "httpd":
+            return "apache2"
+        case "caddy":
+            return "caddy"
+        case "postgresql", "postgres":
+            return "postgresql"
+        case "mysql", "mariadb":
+            return "mysql"
+        case "mongodb", "mongod":
+            return "mongod"
+        case "redis":
+            return "redis-server"
+        case "memcached":
+            return "memcached"
+        case "rabbitmq":
+            return "rabbitmq-server"
+        case "ssh", "sshd":
+            return "sshd"
+        case "cron", "crond":
+            return "cron"
+        case "ufw":
+            return "ufw"
+        case "fail2ban":
+            return "fail2ban"
+        default:
+            // Use the service name as-is, lowercased
+            return service.name.lowercased()
+        }
     }
 }
 
