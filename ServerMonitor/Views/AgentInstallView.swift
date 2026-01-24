@@ -52,7 +52,9 @@ struct AgentInstallView: View {
         .frame(width: 500, height: 450)
         .background(DSDarkTheme.background)
         .preferredColorScheme(.dark)
-        .onAppear {
+        .task {
+            // Small delay to let the sheet animation complete before updating state
+            try? await Task.sleep(nanoseconds: 300_000_000)
             startInstallation(withPassword: nil)
         }
     }
